@@ -35,8 +35,22 @@ commit-sprout water      # (planned) buy a grace day before wilting
 
 ## Install
 
-Not released yet. Once M6 lands there'll be a single static binary for Windows/macOS/Linux and a
-`go install` path. Watch the repo.
+Not released as a prebuilt binary yet, but it already runs. With Go 1.23+ installed:
+
+```bash
+# Run straight from a clone
+git clone https://github.com/rwrife/commit-sprout
+cd commit-sprout
+go run .            # prints the current plant (an ASCII seedling for now)
+
+# Or install the binary onto your PATH
+go install github.com/rwrife/commit-sprout@latest
+commit-sprout      # same thing
+commit-sprout --version
+```
+
+Once M6 lands there'll be a single static binary for Windows/macOS/Linux and a
+tagged release. Watch the repo.
 
 ## How it works (planned)
 
