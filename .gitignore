@@ -1,0 +1,27 @@
+# Binaries / build output
+/commit-sprout
+/dist/
+/bin/
+*.exe
+*.test
+*.out
+
+# Go
+/vendor/
+*.prof
+coverage.txt
+coverage.html
+
+# Local state / config (this tool writes here at runtime)
+state.json
+*.local.json
+
+# Editor / OS cruft
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
