@@ -1,14 +1,17 @@
 // Package cmd defines the cobra command tree for commit-sprout.
 //
-// For M1 the root command simply renders a single hard-coded ASCII seedling.
-// Later milestones wire in git activity reading, the plant state machine,
-// rendering, and persistent state.
+// For M1 the root command renders a single hard-coded ASCII seedling. M2 adds
+// a hidden --activity flag that prints parsed git activity via internal/gitstat
+// as a debugging bridge. Later milestones wire the plant state machine,
+// rendering, and persistent state into the default flow.
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
+	"github.com/rwrife/commit-sprout/internal/gitstat"
 	"github.com/rwrife/commit-sprout/internal/render"
 	"github.com/spf13/cobra"
 )
@@ -17,6 +20,9 @@ import (
 //
 //	go build -ldflags "-X github.com/rwrife/commit-sprout/cmd.version=v0.1.0"
 var version = "dev"
+
+// showActivity backs the hidden --activity debug flag (M2 bridge).
+var showActivity bool
 
 // rootCmd is the base command invoked as `commit-sprout` with no subcommand.
 var rootCmd = &cobra.Command{
@@ -32,9 +38,54 @@ Run with no arguments to render the current plant.`,
 	SilenceErrors: true,
 	Version:       version,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if showActivity {
+			return printActivity(cmd)
+		}
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), render.Seedling())
 		return err
 	},
+}
+
+// printActivity renders the parsed Activity for the current repo. It is a
+// temporary M2 debugging aid behind the hidden --activity flag; the real
+// pipeline (activity -> plant -> render) arrives in later milestones.
+func printActivity(cmd *cobra.Command) error {
+	act, err := gitstat.Read("", gitstat.DefaultWindowDays)
+	if err != nil {
+		if errors.Is(err, gitstat.ErrNotARepo) {
+			_, perr := fmt.Fprintln(cmd.OutOrStdout(),
+				"Not a git repository \u2014 nothing growing here yet. "+
+					"Run commit-sprout inside a repo.")
+			return perr
+		}
+		return err
+	}
+
+	out := cmd.OutOrStdout()
+	if !act.HasCommits {
+		_, perr := fmt.Fprintf(out,
+			"No commits by %s in the last %d days \u2014 plant a seed with your first commit!\n",
+			authorLabel(act.Author), act.WindowDays)
+		return perr
+	}
+
+	fmt.Fprintf(out, "author:   %s\n", authorLabel(act.Author))
+	fmt.Fprintf(out, "window:   last %d days\n", act.WindowDays)
+	fmt.Fprintf(out, "commits:  %d\n", act.TotalInWindow)
+	fmt.Fprintf(out, "streak:   %d day(s)\n", act.Streak)
+	fmt.Fprintf(out, "last:     %s\n", act.LastCommit.Format("2006-01-02 15:04"))
+	for _, day := range act.Days() {
+		fmt.Fprintf(out, "  %s  %d\n", day, act.CommitsByDay[day])
+	}
+	return nil
+}
+
+// authorLabel gives a friendly stand-in when no author email is configured.
+func authorLabel(author string) string {
+	if author == "" {
+		return "(any author)"
+	}
+	return author
 }
 
 // Execute runs the root command and exits non-zero on error.
@@ -48,4 +99,8 @@ func Execute() {
 func init() {
 	// Match the documented interface in README/PLAN: `--version` prints version.
 	rootCmd.SetVersionTemplate("commit-sprout {{.Version}}\n")
+
+	// Hidden M2 bridge: dump parsed git activity. Removed once M3+ consume it.
+	rootCmd.Flags().BoolVar(&showActivity, "activity", false, "print parsed git activity (debug)")
+	_ = rootCmd.Flags().MarkHidden("activity")
 }

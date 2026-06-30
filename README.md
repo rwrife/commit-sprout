@@ -55,6 +55,9 @@ tagged release. Watch the repo.
 ## How it works (planned)
 
 1. Shell out to `git log` for the current repo, count commits per day by your author email.
+   _(Implemented — M2. The reader lives in `internal/gitstat` and normalizes history into an
+   `Activity` value: commits-per-day, last commit, current streak, and total in a look-back
+   window. You can peek at it today with the hidden `commit-sprout --activity` debug flag.)_
 2. Map that activity → a growth **stage** (seed → sprout → leafy → tall → blooming) plus a
    **health** modifier (wilting when you've gone quiet).
 3. Persist a little state (`~/.config/commit-sprout/state.json`) so the plant remembers its best
