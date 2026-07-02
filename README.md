@@ -60,6 +60,11 @@ tagged release. Watch the repo.
    window. You can peek at it today with the hidden `commit-sprout --activity` debug flag.)_
 2. Map that activity → a growth **stage** (seed → sprout → leafy → tall → blooming) plus a
    **health** modifier (wilting when you've gone quiet).
+   _(Implemented — M3. The state machine lives in `internal/plant`: `plant.Compute(activity,
+   state, now)` is a pure, deterministic function that resolves the stage (streak-driven, with a
+   busy-day shortcut), a health modifier (healthy → thirsty → wilting by commit recency), and a
+   short mood line. Remembered peak growth floors the stage so one quiet day dents health before
+   it shrinks the plant. Thresholds all live in one tunable block.)_
 3. Persist a little state (`~/.config/commit-sprout/state.json`) so the plant remembers its best
    days and your streak.
 4. Render ASCII. No cloud. No telemetry. We never read your code — just commit counts and times.
