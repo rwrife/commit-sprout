@@ -10,8 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/mattn/go-isatty"
 	"github.com/rwrife/commit-sprout/internal/gitstat"
+	"github.com/rwrife/commit-sprout/internal/plant"
 	"github.com/rwrife/commit-sprout/internal/render"
 	"github.com/spf13/cobra"
 )
@@ -23,6 +26,9 @@ var version = "dev"
 
 // showActivity backs the hidden --activity debug flag (M2 bridge).
 var showActivity bool
+
+// noColor backs the --no-color flag, forcing the plain-ASCII render path.
+var noColor bool
 
 // rootCmd is the base command invoked as `commit-sprout` with no subcommand.
 var rootCmd = &cobra.Command{
@@ -41,9 +47,58 @@ Run with no arguments to render the current plant.`,
 		if showActivity {
 			return printActivity(cmd)
 		}
-		_, err := fmt.Fprintln(cmd.OutOrStdout(), render.Seedling())
-		return err
+		return renderPlant(cmd)
 	},
+}
+
+// renderPlant runs the full pipeline for the current repo: read git activity,
+// compute the plant state, and render a framed ASCII plant to stdout. This is
+// the real M4 default flow, replacing the M1 hard-coded seedling.
+//
+// State persistence (M5) is not wired yet, so a zero plant.State is used; the
+// memory floor still behaves correctly from a fresh state, and M5 will load the
+// remembered highest stage/streak here.
+func renderPlant(cmd *cobra.Command) error {
+	out := cmd.OutOrStdout()
+
+	act, err := gitstat.Read("", gitstat.DefaultWindowDays)
+	if err != nil {
+		if errors.Is(err, gitstat.ErrNotARepo) {
+			_, perr := fmt.Fprintln(out,
+				"Not a git repository \u2014 nothing growing here yet. "+
+					"Run commit-sprout inside a repo.")
+			return perr
+		}
+		return err
+	}
+
+	now := time.Now()
+	ps := plant.Compute(act, plant.State{}, now)
+
+	frame := render.Frame(ps, render.Options{
+		Color:      useColor(cmd),
+		Now:        now,
+		LastCommit: act.LastCommit,
+	})
+	_, perr := fmt.Fprintln(out, frame)
+	return perr
+}
+
+// useColor decides whether to take the color render path. Color is disabled by
+// --no-color, by the NO_COLOR environment variable (any value), and whenever
+// stdout is not a terminal (piped/redirected), keeping output pipe-safe.
+func useColor(cmd *cobra.Command) bool {
+	if noColor {
+		return false
+	}
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		return false
+	}
+	f, ok := cmd.OutOrStdout().(*os.File)
+	if !ok {
+		return false
+	}
+	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 }
 
 // printActivity renders the parsed Activity for the current repo. It is a
@@ -99,6 +154,10 @@ func Execute() {
 func init() {
 	// Match the documented interface in README/PLAN: `--version` prints version.
 	rootCmd.SetVersionTemplate("commit-sprout {{.Version}}\n")
+
+	// --no-color forces the plain-ASCII render path (also honored via NO_COLOR
+	// and automatically for non-TTY output).
+	rootCmd.Flags().BoolVar(&noColor, "no-color", false, "disable color output (plain ASCII)")
 
 	// Hidden M2 bridge: dump parsed git activity. Removed once M3+ consume it.
 	rootCmd.Flags().BoolVar(&showActivity, "activity", false, "print parsed git activity (debug)")

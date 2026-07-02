@@ -41,7 +41,7 @@ Not released as a prebuilt binary yet, but it already runs. With Go 1.23+ instal
 # Run straight from a clone
 git clone https://github.com/rwrife/commit-sprout
 cd commit-sprout
-go run .            # prints the current plant (an ASCII seedling for now)
+go run .            # renders the live plant for the repo you're in (add --no-color for plain ASCII)
 
 # Or install the binary onto your PATH
 go install github.com/rwrife/commit-sprout@latest
@@ -68,6 +68,12 @@ tagged release. Watch the repo.
 3. Persist a little state (`~/.config/commit-sprout/state.json`) so the plant remembers its best
    days and your streak.
 4. Render ASCII. No cloud. No telemetry. We never read your code — just commit counts and times.
+   _(Implemented — M4. `internal/render` draws real ASCII art for every stage × health combo
+   (the plant visibly droops as it dries out), plus a caption block with stage, streak, last
+   commit, and a days-until-wilt nudge. Color is via `lipgloss`; the plain-ASCII path is used
+   automatically for `--no-color`, the `NO_COLOR` env var, and any non-TTY/piped output, so it
+   stays pipe-safe. `commit-sprout` now renders the live plant for your repo instead of a static
+   seedling — persisting its memory across runs arrives with M5.)_
 
 ## Tech
 
