@@ -16,6 +16,7 @@ import (
 	"github.com/rwrife/commit-sprout/internal/gitstat"
 	"github.com/rwrife/commit-sprout/internal/plant"
 	"github.com/rwrife/commit-sprout/internal/render"
+	"github.com/rwrife/commit-sprout/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -29,6 +30,11 @@ var showActivity bool
 
 // noColor backs the --no-color flag, forcing the plain-ASCII render path.
 var noColor bool
+
+// noSave backs the --no-save flag, which renders without persisting state.
+// Handy for read-only prompt/status contexts or when you don't want a run to
+// update the remembered plant.
+var noSave bool
 
 // rootCmd is the base command invoked as `commit-sprout` with no subcommand.
 var rootCmd = &cobra.Command{
@@ -51,13 +57,14 @@ Run with no arguments to render the current plant.`,
 	},
 }
 
-// renderPlant runs the full pipeline for the current repo: read git activity,
-// compute the plant state, and render a framed ASCII plant to stdout. This is
-// the real M4 default flow, replacing the M1 hard-coded seedling.
+// renderPlant runs the full pipeline for the current repo: load remembered
+// state, read git activity, compute the plant state, render a framed ASCII
+// plant to stdout, then persist the updated memory back to disk.
 //
-// State persistence (M5) is not wired yet, so a zero plant.State is used; the
-// memory floor still behaves correctly from a fresh state, and M5 will load the
-// remembered highest stage/streak here.
+// Persistence is best-effort and never blocks rendering: a load failure falls
+// back to a fresh plant, and a save failure is reported on stderr but does not
+// fail the command (so a read-only home dir or full disk still shows the
+// plant). The --no-save flag skips the write entirely.
 func renderPlant(cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
 
@@ -72,16 +79,38 @@ func renderPlant(cmd *cobra.Command) error {
 		return err
 	}
 
+	// Load remembered state (highest stage, best streak). A read error degrades
+	// to a fresh plant but is surfaced on stderr for visibility.
+	statePath, pathErr := store.DefaultPath()
+	persisted := store.DefaultState()
+	if pathErr == nil {
+		if loaded, lerr := store.Load(statePath); lerr != nil {
+			fmt.Fprintln(os.Stderr, "commit-sprout: warning:", lerr)
+		} else {
+			persisted = loaded
+		}
+	}
+
 	now := time.Now()
-	ps := plant.Compute(act, plant.State{}, now)
+	ps := plant.Compute(act, persisted.Plant(), now)
 
 	frame := render.Frame(ps, render.Options{
 		Color:      useColor(cmd),
 		Now:        now,
 		LastCommit: act.LastCommit,
 	})
-	_, perr := fmt.Fprintln(out, frame)
-	return perr
+	if _, perr := fmt.Fprintln(out, frame); perr != nil {
+		return perr
+	}
+
+	// Persist the updated memory. Best-effort: warn but don't fail the command.
+	if !noSave && pathErr == nil {
+		updated := persisted.FromPlant(ps, "", act.LastCommit)
+		if serr := store.Save(statePath, updated); serr != nil {
+			fmt.Fprintln(os.Stderr, "commit-sprout: warning:", serr)
+		}
+	}
+	return nil
 }
 
 // useColor decides whether to take the color render path. Color is disabled by
@@ -158,6 +187,9 @@ func init() {
 	// --no-color forces the plain-ASCII render path (also honored via NO_COLOR
 	// and automatically for non-TTY output).
 	rootCmd.Flags().BoolVar(&noColor, "no-color", false, "disable color output (plain ASCII)")
+
+	// --no-save renders without persisting state (read-only run).
+	rootCmd.Flags().BoolVar(&noSave, "no-save", false, "do not persist plant state for this run")
 
 	// Hidden M2 bridge: dump parsed git activity. Removed once M3+ consume it.
 	rootCmd.Flags().BoolVar(&showActivity, "activity", false, "print parsed git activity (debug)")
