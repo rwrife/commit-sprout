@@ -1,0 +1,76 @@
+# GoReleaser configuration for commit-sprout.
+#
+# On a pushed tag (vX.Y.Z) the release workflow (.github/workflows/release.yml)
+# runs `goreleaser release`, which cross-compiles a static single binary for
+# Linux, macOS, and Windows and publishes a GitHub Release with archives and
+# checksums. The build is CGO-free so every artifact is a self-contained binary
+# with no runtime to install -- exactly what a prompt-hot-path tool wants.
+#
+# Validate locally without publishing:
+#   goreleaser check
+#   goreleaser release --snapshot --clean
+version: 2
+
+project_name: commit-sprout
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: commit-sprout
+    main: .
+    binary: commit-sprout
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Trim paths and inject the version/commit/date into cmd.version so
+    # `commit-sprout --version` reports the released tag.
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/rwrife/commit-sprout/cmd.version={{ .Version }}
+
+archives:
+  - id: commit-sprout
+    # Keep names predictable: commit-sprout_<version>_<os>_<arch>.<ext>
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format: tar.gz
+    # Windows users generally expect a zip.
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  draft: false
+  prerelease: auto
+  name_template: "commit-sprout {{ .Tag }}"
