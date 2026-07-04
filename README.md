@@ -67,13 +67,19 @@ tagged release. Watch the repo.
    it shrinks the plant. Thresholds all live in one tunable block.)_
 3. Persist a little state (`~/.config/commit-sprout/state.json`) so the plant remembers its best
    days and your streak.
+   _(Implemented — M5. `internal/store` loads/saves an XDG-aware, versioned JSON file
+   (`$XDG_CONFIG_HOME/commit-sprout/state.json`, falling back to `~/.config/...`) that remembers
+   the highest stage ever reached, your best streak, and the last-seen commit. Writes are atomic
+   (temp file + rename) so a crash never corrupts it, and a missing or garbled file heals to sane
+   defaults instead of erroring. State is loaded before compute and saved after render; pass
+   `--no-save` for a read-only run that leaves your plant's memory untouched.)_
 4. Render ASCII. No cloud. No telemetry. We never read your code — just commit counts and times.
    _(Implemented — M4. `internal/render` draws real ASCII art for every stage × health combo
    (the plant visibly droops as it dries out), plus a caption block with stage, streak, last
    commit, and a days-until-wilt nudge. Color is via `lipgloss`; the plain-ASCII path is used
    automatically for `--no-color`, the `NO_COLOR` env var, and any non-TTY/piped output, so it
-   stays pipe-safe. `commit-sprout` now renders the live plant for your repo instead of a static
-   seedling — persisting its memory across runs arrives with M5.)_
+   stays pipe-safe. `commit-sprout` renders the live plant for your repo instead of a static
+   seedling, and (as of M5) remembers its best growth across runs.)_
 
 ## Tech
 
