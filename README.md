@@ -16,7 +16,8 @@
 `commit-sprout` reads your git history and turns "did I actually ship anything?" into something
 you can *see*. It's local-first, single-binary, and has opinions about your commit cadence.
 
-> Status: **early days** — see [PLAN.md](./PLAN.md) and the milestone issues.
+> Status: **v0.1** — the plant renders, reacts to your commits, and drops into
+> your prompt. See [PLAN.md](./PLAN.md) and the milestone issues for what's next.
 
 ## Why
 
@@ -29,13 +30,48 @@ dopamine as a contribution streak, but with a face (well, leaves).
 ```bash
 commit-sprout            # render the current plant for the repo you're in
 commit-sprout status     # streak, last commit, days until it wilts
-commit-sprout --prompt   # compact glyph for your shell prompt / tmux status
+commit-sprout prompt     # compact glyph for your shell prompt / tmux status
+commit-sprout --prompt   # same thing, as a flag (handy inside a prompt string)
 commit-sprout water      # (planned) buy a grace day before wilting
 ```
 
+`status` prints a plain, script-friendly summary:
+
+```text
+stage:   leafy (healthy)
+streak:  6 days (best: 11 days)
+last:    today (2026-07-04)
+health:  healthy — 2 days of cushion before it gets thirsty
+```
+
+`prompt` prints a single glyph + stage (e.g. `ل leafy`). It is built for the
+hot path: **read-only by default** (a prompt renders on every command, so it
+skips the state write unless you pass `--save`) and it **fails silently outside
+a git repo** — it prints nothing and exits `0`, so it can never break your
+shell. Drop it in and forget it.
+
 ## Install
 
-Not released as a prebuilt binary yet, but it already runs. With Go 1.23+ installed:
+### Prebuilt binary (recommended)
+
+Grab a static, single-file binary for your OS/arch from the
+[latest release](https://github.com/rwrife/commit-sprout/releases/latest) —
+builds are published for Linux, macOS, and Windows (amd64 + arm64), with
+checksums. No runtime to install. Unpack it and drop `commit-sprout` on your
+`PATH`, e.g.:
+
+```bash
+# Linux/macOS example (adjust the asset name to your OS/arch)
+curl -sSL -o commit-sprout.tar.gz \
+  https://github.com/rwrife/commit-sprout/releases/latest/download/commit-sprout_<version>_linux_amd64.tar.gz
+tar -xzf commit-sprout.tar.gz commit-sprout
+install -m 0755 commit-sprout ~/.local/bin/   # or anywhere on your PATH
+commit-sprout --version
+```
+
+### From source
+
+With Go 1.23+ installed:
 
 ```bash
 # Run straight from a clone
@@ -49,8 +85,50 @@ commit-sprout      # same thing
 commit-sprout --version
 ```
 
-Once M6 lands there'll be a single static binary for Windows/macOS/Linux and a
-tagged release. Watch the repo.
+## Put it in your shell prompt
+
+`commit-sprout prompt` emits one line (`glyph stage`) and is safe to call on
+every prompt render — it does no disk writes by default and stays silent outside
+a git repo. A few ways to wire it up:
+
+**starship** (`~/.config/starship.toml`) — add a custom module:
+
+```toml
+[custom.commit_sprout]
+command = "commit-sprout prompt"
+when = "git rev-parse --is-inside-work-tree"
+shell = ["sh", "--norc"]
+format = "[$output]($style) "
+style = "green"
+```
+
+**tmux** (`~/.tmux.conf`) — show it in the status line (polled, so keep the
+interval sane):
+
+```tmux
+set -g status-interval 60
+set -g status-right "#(cd #{pane_current_path} && commit-sprout prompt) | %H:%M"
+```
+
+**bash** (`~/.bashrc`) — prepend the glyph to your prompt:
+
+```bash
+__commit_sprout() { commit-sprout prompt 2>/dev/null; }
+PROMPT_COMMAND='PS1_SPROUT=$(__commit_sprout)'
+PS1='${PS1_SPROUT:+$PS1_SPROUT }\u@\h:\w\$ '
+```
+
+**zsh** (`~/.zshrc`) — same idea with a precmd hook:
+
+```zsh
+autoload -Uz add-zsh-hook
+__commit_sprout() { psvar[1]="$(commit-sprout prompt 2>/dev/null)"; }
+add-zsh-hook precmd __commit_sprout
+setopt prompt_subst
+PROMPT='%(1V.%1v .)%n@%m:%~%# '
+```
+
+All of these degrade cleanly: no repo, no glyph, no error.
 
 ## How it works (planned)
 
@@ -92,7 +170,7 @@ See [PLAN.md](./PLAN.md) for the full plan, milestones (M1–M6), and the v0.2+ 
 
 ## License
 
-MIT (see [LICENSE](./LICENSE) once added).
+MIT — see [LICENSE](./LICENSE).
 
 ---
 

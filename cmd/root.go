@@ -1,9 +1,10 @@
 // Package cmd defines the cobra command tree for commit-sprout.
 //
-// For M1 the root command renders a single hard-coded ASCII seedling. M2 adds
-// a hidden --activity flag that prints parsed git activity via internal/gitstat
-// as a debugging bridge. Later milestones wire the plant state machine,
-// rendering, and persistent state into the default flow.
+// The root command renders the full ASCII plant for the current repo. Two
+// focused subcommands ride on the same pipeline: `status` prints a compact,
+// plain-text summary (streak, last commit, days-until-wilt) and `prompt`
+// (also reachable as the `--prompt` flag on the root) emits a single-line
+// glyph for shell prompts, tmux, and starship.
 package cmd
 
 import (
@@ -23,6 +24,8 @@ import (
 // version is the build version. It is overridable at build time via:
 //
 //	go build -ldflags "-X github.com/rwrife/commit-sprout/cmd.version=v0.1.0"
+//
+// GoReleaser sets it automatically from the git tag (see .goreleaser.yaml).
 var version = "dev"
 
 // showActivity backs the hidden --activity debug flag (M2 bridge).
@@ -36,6 +39,10 @@ var noColor bool
 // update the remembered plant.
 var noSave bool
 
+// promptMode backs the --prompt flag on the root command, a convenience alias
+// for the `prompt` subcommand so it drops cleanly into a shell prompt string.
+var promptMode bool
+
 // rootCmd is the base command invoked as `commit-sprout` with no subcommand.
 var rootCmd = &cobra.Command{
 	Use:   "commit-sprout",
@@ -44,7 +51,9 @@ var rootCmd = &cobra.Command{
 anything?" into something you can see. Commit today and it sprouts; keep a
 streak and it blooms; ghost your repo and it wilts.
 
-Run with no arguments to render the current plant.`,
+Run with no arguments to render the current plant. Use "status" for a compact
+text summary or "prompt" (or --prompt) for a one-line glyph you can embed in a
+shell prompt, tmux, or starship.`,
 	// SilenceUsage/SilenceErrors keep output clean; we print errors ourselves.
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -53,34 +62,37 @@ Run with no arguments to render the current plant.`,
 		if showActivity {
 			return printActivity(cmd)
 		}
+		if promptMode {
+			return renderPrompt(cmd)
+		}
 		return renderPlant(cmd)
 	},
 }
 
-// renderPlant runs the full pipeline for the current repo: load remembered
-// state, read git activity, compute the plant state, render a framed ASCII
-// plant to stdout, then persist the updated memory back to disk.
-//
-// Persistence is best-effort and never blocks rendering: a load failure falls
-// back to a fresh plant, and a save failure is reported on stderr but does not
-// fail the command (so a read-only home dir or full disk still shows the
-// plant). The --no-save flag skips the write entirely.
-func renderPlant(cmd *cobra.Command) error {
-	out := cmd.OutOrStdout()
+// pipelineResult bundles everything the render/status/prompt paths need out of
+// one pass over the repo: the raw activity, the loaded persisted state (and its
+// path), and the computed plant state as of `now`.
+type pipelineResult struct {
+	activity  gitstat.Activity
+	persisted store.State
+	statePath string
+	pathErr   error
+	plant     plant.PlantState
+	now       time.Time
+}
 
+// runPipeline performs the shared read half of every command: read git
+// activity, load remembered state, and compute the plant state. It never
+// writes; callers decide whether to persist afterward via persist().
+//
+// It returns gitstat.ErrNotARepo unwrapped so callers can special-case the
+// "not a repo" message in their own voice.
+func runPipeline() (pipelineResult, error) {
 	act, err := gitstat.Read("", gitstat.DefaultWindowDays)
 	if err != nil {
-		if errors.Is(err, gitstat.ErrNotARepo) {
-			_, perr := fmt.Fprintln(out,
-				"Not a git repository \u2014 nothing growing here yet. "+
-					"Run commit-sprout inside a repo.")
-			return perr
-		}
-		return err
+		return pipelineResult{}, err
 	}
 
-	// Load remembered state (highest stage, best streak). A read error degrades
-	// to a fresh plant but is surfaced on stderr for visibility.
 	statePath, pathErr := store.DefaultPath()
 	persisted := store.DefaultState()
 	if pathErr == nil {
@@ -94,22 +106,62 @@ func renderPlant(cmd *cobra.Command) error {
 	now := time.Now()
 	ps := plant.Compute(act, persisted.Plant(), now)
 
-	frame := render.Frame(ps, render.Options{
+	return pipelineResult{
+		activity:  act,
+		persisted: persisted,
+		statePath: statePath,
+		pathErr:   pathErr,
+		plant:     ps,
+		now:       now,
+	}, nil
+}
+
+// persist folds the computed plant state back into the remembered file, unless
+// --no-save was set or the state path could not be resolved. It is best-effort:
+// a write failure is surfaced on stderr but never fails the command, so a
+// read-only home dir or full disk still lets the plant render.
+func persist(r pipelineResult) {
+	if noSave || r.pathErr != nil {
+		return
+	}
+	updated := r.persisted.FromPlant(r.plant, "", r.activity.LastCommit)
+	if serr := store.Save(r.statePath, updated); serr != nil {
+		fmt.Fprintln(os.Stderr, "commit-sprout: warning:", serr)
+	}
+}
+
+// notARepoMessage prints the friendly "nothing growing here" line and returns
+// any write error. It centralizes the wording shared by every command.
+func notARepoMessage(cmd *cobra.Command) error {
+	_, perr := fmt.Fprintln(cmd.OutOrStdout(),
+		"Not a git repository \u2014 nothing growing here yet. "+
+			"Run commit-sprout inside a repo.")
+	return perr
+}
+
+// renderPlant runs the full pipeline for the current repo and renders a framed
+// ASCII plant to stdout, then persists the updated memory back to disk.
+func renderPlant(cmd *cobra.Command) error {
+	out := cmd.OutOrStdout()
+
+	r, err := runPipeline()
+	if err != nil {
+		if errors.Is(err, gitstat.ErrNotARepo) {
+			return notARepoMessage(cmd)
+		}
+		return err
+	}
+
+	frame := render.Frame(r.plant, render.Options{
 		Color:      useColor(cmd),
-		Now:        now,
-		LastCommit: act.LastCommit,
+		Now:        r.now,
+		LastCommit: r.activity.LastCommit,
 	})
 	if _, perr := fmt.Fprintln(out, frame); perr != nil {
 		return perr
 	}
 
-	// Persist the updated memory. Best-effort: warn but don't fail the command.
-	if !noSave && pathErr == nil {
-		updated := persisted.FromPlant(ps, "", act.LastCommit)
-		if serr := store.Save(statePath, updated); serr != nil {
-			fmt.Fprintln(os.Stderr, "commit-sprout: warning:", serr)
-		}
-	}
+	persist(r)
 	return nil
 }
 
@@ -137,10 +189,7 @@ func printActivity(cmd *cobra.Command) error {
 	act, err := gitstat.Read("", gitstat.DefaultWindowDays)
 	if err != nil {
 		if errors.Is(err, gitstat.ErrNotARepo) {
-			_, perr := fmt.Fprintln(cmd.OutOrStdout(),
-				"Not a git repository \u2014 nothing growing here yet. "+
-					"Run commit-sprout inside a repo.")
-			return perr
+			return notARepoMessage(cmd)
 		}
 		return err
 	}
@@ -189,9 +238,17 @@ func init() {
 	rootCmd.Flags().BoolVar(&noColor, "no-color", false, "disable color output (plain ASCII)")
 
 	// --no-save renders without persisting state (read-only run).
-	rootCmd.Flags().BoolVar(&noSave, "no-save", false, "do not persist plant state for this run")
+	rootCmd.PersistentFlags().BoolVar(&noSave, "no-save", false, "do not persist plant state for this run")
+
+	// --prompt is a convenience alias for the `prompt` subcommand so the glyph
+	// drops straight into a shell prompt string.
+	rootCmd.Flags().BoolVar(&promptMode, "prompt", false, "emit a one-line glyph for shell prompt / tmux / starship")
 
 	// Hidden M2 bridge: dump parsed git activity. Removed once M3+ consume it.
 	rootCmd.Flags().BoolVar(&showActivity, "activity", false, "print parsed git activity (debug)")
 	_ = rootCmd.Flags().MarkHidden("activity")
+
+	// Subcommands (M6): status + prompt ride the shared pipeline.
+	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(promptCmd)
 }
