@@ -60,6 +60,15 @@ const (
 	// "Today" is 0 days idle, "yesterday" is 1, and so on.
 	thirstyAfterDays = 1 // still healthy through yesterday
 	wiltingAfterDays = 3 // thirsty on days 2-3, wilting from day 4+
+
+	// MaxGraceDays caps how many watering-can grace days can ever be in
+	// effect at once. Watering (`commit-sprout water`) buys the plant extra
+	// idle days before it turns thirsty/wilts -- a deliberate "I'm on PTO /
+	// weekend" escape hatch. The cap is what keeps watering from being spammed
+	// into a permanent green streak: at most MaxGraceDays of neglect can be
+	// papered over, and crucially grace only shifts *health* thresholds, never
+	// the growth stage or the streak count (see applyGrace / Compute).
+	MaxGraceDays = 2
 )
 
 // Stage is the plant's growth stage. Stages are ordered; higher values are
@@ -143,6 +152,16 @@ type State struct {
 	// display/brag purposes and does not currently affect the computed
 	// stage, but lives here so persistence is forward-compatible.
 	BestStreak int
+
+	// GraceDays is the number of watering-can grace days currently in effect
+	// for the ongoing dry spell. It pushes the thirsty/wilting thresholds
+	// back by that many idle days so a deliberately watered plant survives a
+	// weekend or PTO without a commit. It never affects the growth Stage or
+	// the Streak -- watering buys health, not fake progress -- and is clamped
+	// to [0, MaxGraceDays] by Compute so a hand-edited file cannot grant an
+	// unbounded reprieve. It resets to 0 once a fresh commit lands (the store
+	// prunes stale waterings), so grace only ever covers the current gap.
+	GraceDays int
 }
 
 // PlantState is the fully-resolved state of the plant for one render: its
@@ -166,6 +185,12 @@ type PlantState struct {
 	// and -1 when there are no commits at all (nothing to measure from).
 	DaysSinceCommit int
 
+	// GraceDays is the number of watering-can grace days actually in effect
+	// for this render (clamped to [0, MaxGraceDays]). It is surfaced so status
+	// output can report remaining grace and a corrected next-wilt date; it
+	// does not influence Stage or Streak.
+	GraceDays int
+
 	// Mood is a short, flavorful one-liner describing how the plant "feels"
 	// given its stage and health. Kept terse and with a little personality.
 	Mood string
@@ -188,7 +213,8 @@ type PlantState struct {
 // never below Sprout once anything has ever grown.
 func Compute(act gitstat.Activity, st State, now time.Time) PlantState {
 	days := daysSinceCommit(act, now)
-	health := healthFor(days, act.HasCommits)
+	grace := clampGrace(st.GraceDays)
+	health := healthFor(days, act.HasCommits, grace)
 	live := liveStage(act)
 
 	// Remember the tallest we've ever been (peak of memory and live growth).
@@ -209,6 +235,7 @@ func Compute(act gitstat.Activity, st State, now time.Time) PlantState {
 		Health:              health,
 		Streak:              act.Streak,
 		DaysSinceCommit:     days,
+		GraceDays:           grace,
 		Mood:                moodFor(stage, health, act),
 		UpdatedHighestStage: highest,
 	}
@@ -281,18 +308,42 @@ func dayStart(t time.Time) time.Time {
 
 // healthFor maps days-since-last-commit to a Health. With no commits at all the
 // plant is a fresh Seed and reported Healthy (there is nothing to wilt yet).
-func healthFor(days int, hasCommits bool) Health {
+//
+// grace is the number of watering-can days in effect (already clamped): it
+// shifts the idle count back so a watered plant tolerates that many extra quiet
+// days before drying out. Grace only moves the health thresholds; the caller
+// keeps Stage and Streak untouched, so watering can never fake growth.
+func healthFor(days int, hasCommits bool, grace int) Health {
 	if !hasCommits || days < 0 {
 		return Healthy
 	}
+	// Grace effectively rewinds the dry spell: two watered days make a
+	// four-day gap feel like two. Never let it drop below "committed today".
+	effective := days - grace
+	if effective < 0 {
+		effective = 0
+	}
 	switch {
-	case days <= thirstyAfterDays:
+	case effective <= thirstyAfterDays:
 		return Healthy
-	case days <= wiltingAfterDays:
+	case effective <= wiltingAfterDays:
 		return Thirsty
 	default:
 		return Wilting
 	}
+}
+
+// clampGrace bounds a raw grace-day count into the supported [0, MaxGraceDays]
+// range so neither a negative nor an over-large (hand-edited) value can distort
+// the health calculation.
+func clampGrace(g int) int {
+	if g < 0 {
+		return 0
+	}
+	if g > MaxGraceDays {
+		return MaxGraceDays
+	}
+	return g
 }
 
 // moodFor returns a short flavor line for the given stage/health, with a little

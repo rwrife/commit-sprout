@@ -53,7 +53,13 @@ func renderStatus(cmd *cobra.Command) error {
 	fmt.Fprintf(out, "stage:   %s (%s)\n", ps.Stage, ps.Health)
 	fmt.Fprintf(out, "streak:  %s\n", statusStreak(ps.Streak, r.persisted.BestStreak))
 	fmt.Fprintf(out, "last:    %s\n", statusLastCommit(ps, r.activity.LastCommit, r.now))
+	if line := statusGrace(ps); line != "" {
+		fmt.Fprintf(out, "grace:   %s\n", line)
+	}
 	fmt.Fprintf(out, "health:  %s\n", statusWilt(ps))
+	if when := nextWiltDate(ps, r.activity.LastCommit, r.now); when != "" {
+		fmt.Fprintf(out, "wilts:   %s\n", when)
+	}
 
 	persist(r)
 	return nil
@@ -100,16 +106,44 @@ func statusLastCommit(ps plant.PlantState, last time.Time, now time.Time) string
 	}
 }
 
+// statusGrace reports how many watering-can grace days are currently propping
+// the plant up, or "" when none are in effect (so the line is omitted). It
+// makes the escape-hatch visible without cluttering the common no-grace case.
+func statusGrace(ps plant.PlantState) string {
+	switch {
+	case ps.GraceDays <= 0:
+		return ""
+	case ps.GraceDays == 1:
+		return "1 day (watered)"
+	default:
+		return fmt.Sprintf("%d days (watered)", ps.GraceDays)
+	}
+}
+
+// effectiveIdle is the idle-day count the health thresholds actually see: raw
+// days since the last commit, rewound by any watering-can grace, floored at 0.
+// It is the single source of truth shared by statusWilt and nextWiltDate so the
+// text and the date can never disagree.
+func effectiveIdle(ps plant.PlantState) int {
+	d := ps.DaysSinceCommit - ps.GraceDays
+	if d < 0 {
+		d = 0
+	}
+	return d
+}
+
 // statusWilt turns the health state into a one-line, days-until-wilt nudge that
 // mirrors the render caption's spirit. Healthy plants report how many idle days
-// they can still absorb before turning thirsty.
+// they can still absorb before turning thirsty. Watering-can grace is folded in
+// via effectiveIdle, so a watered plant honestly reports the extra runway it
+// bought rather than the raw calendar gap.
 func statusWilt(ps plant.PlantState) string {
 	switch ps.Health {
 	case plant.Wilting:
 		return "wilting \u2014 commit to revive it"
 	case plant.Thirsty:
-		// Thirsty spans days 2-3 idle; wilting begins at day 4.
-		remaining := 4 - ps.DaysSinceCommit
+		// Thirsty spans effective days 2-3 idle; wilting begins at day 4.
+		remaining := 4 - effectiveIdle(ps)
 		if remaining < 1 {
 			remaining = 1
 		}
@@ -122,7 +156,7 @@ func statusWilt(ps plant.PlantState) string {
 		if ps.DaysSinceCommit < 0 {
 			return "healthy"
 		}
-		cushion := 2 - ps.DaysSinceCommit
+		cushion := 2 - effectiveIdle(ps)
 		if cushion < 1 {
 			cushion = 1
 		}
@@ -131,4 +165,30 @@ func statusWilt(ps plant.PlantState) string {
 		}
 		return fmt.Sprintf("healthy \u2014 %d days of cushion before it gets thirsty", cushion)
 	}
+}
+
+// nextWiltDate estimates the calendar date on which the plant will begin to
+// wilt if no further commits (or waterings) land, accounting for any grace
+// already in effect. It returns "" when there is nothing to project (no commits
+// yet) or when the plant is already wilting. Wilting begins once effective idle
+// days exceed wiltingAfterDays (3), i.e. on the 4th effective idle day.
+func nextWiltDate(ps plant.PlantState, last time.Time, now time.Time) string {
+	if ps.DaysSinceCommit < 0 || last.IsZero() {
+		return ""
+	}
+	if ps.Health == plant.Wilting {
+		return ""
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	// Days from now until the first wilting day: the plant wilts when
+	// effectiveIdle reaches 4, so it has (4 - effectiveIdle) safe days left,
+	// and wilting lands the day after the last safe day.
+	daysLeft := 4 - effectiveIdle(ps)
+	if daysLeft < 1 {
+		daysLeft = 1
+	}
+	wiltDay := now.AddDate(0, 0, daysLeft)
+	return wiltDay.Format("2006-01-02")
 }

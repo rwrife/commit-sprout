@@ -25,6 +25,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/rwrife/commit-sprout/internal/plant"
@@ -80,7 +81,23 @@ type State struct {
 	// LastCommitTime is the author timestamp of the most recently seen
 	// commit, when known. It is the zero time when nothing has been seen.
 	LastCommitTime time.Time `json:"last_commit_time,omitempty"`
+
+	// WateredDates lists the calendar days (YYYY-MM-DD, in the local zone at
+	// the time of watering) on which the user ran `commit-sprout water` to buy
+	// a grace day. It is stored as human-readable dates rather than a bare
+	// counter for three reasons: it is auditable in the JSON file, it makes
+	// "already watered today" trivially idempotent, and it lets a fresh commit
+	// prune waterings that predate it so grace only ever covers the *current*
+	// dry spell. The slice is kept sorted and de-duplicated by normalize; only
+	// the most recent MaxWateredDatesKept entries are retained so the file
+	// cannot grow without bound.
+	WateredDates []string `json:"watered_dates,omitempty"`
 }
+
+// MaxWateredDatesKept bounds how many watering dates are retained on disk. Only
+// the most recent few ever matter (grace is capped and scoped to the current
+// gap), so older entries are pruned to keep the state file small.
+const MaxWateredDatesKept = 16
 
 // DefaultState returns the state used when there is nothing on disk yet (or the
 // existing file could not be read). It is a fresh plant stamped with the
@@ -96,7 +113,14 @@ func DefaultState() State {
 // plant.Compute. Unknown/garbage stage names degrade safely to Seed, and a
 // negative best streak is clamped to zero, so a hand-edited or partially
 // corrupt file can never feed nonsense into the state machine.
-func (s State) Plant() plant.State {
+//
+// now is the reference clock and lastCommit is the author time of the most
+// recent commit observed this run (zero when there are no commits). They are
+// used to derive the effective watering-can grace: only waterings that fall
+// after the last commit and on or before today count, capped at
+// plant.MaxGraceDays, so grace always scopes to the current dry spell and can
+// never be stockpiled into a permanent green streak.
+func (s State) Plant(now time.Time, lastCommit time.Time) plant.State {
 	best := s.BestStreak
 	if best < 0 {
 		best = 0
@@ -104,7 +128,117 @@ func (s State) Plant() plant.State {
 	return plant.State{
 		HighestStage: parseStage(s.HighestStage),
 		BestStreak:   best,
+		GraceDays:    s.EffectiveGrace(now, lastCommit),
 	}
+}
+
+// EffectiveGrace returns how many watering-can grace days currently apply to
+// the ongoing dry spell, clamped to [0, plant.MaxGraceDays].
+//
+// A watering counts only when its date is strictly after the last commit's
+// calendar day (so committing "uses up" and invalidates earlier waterings) and
+// is not in the future relative to now. When there is no commit at all, every
+// recorded watering on or before today counts (there is no commit to reset
+// against yet). The count is capped so at most a couple of neglected days can
+// be papered over.
+func (s State) EffectiveGrace(now time.Time, lastCommit time.Time) int {
+	if len(s.WateredDates) == 0 {
+		return 0
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	today := dayStamp(now)
+
+	// Waterings must post-date the last commit's day; a fresh commit wipes
+	// the slate. With no commit yet, use a sentinel that lets everything
+	// through.
+	var floor string
+	if !lastCommit.IsZero() {
+		floor = dayStamp(lastCommit.In(now.Location()))
+	}
+
+	count := 0
+	for _, d := range s.WateredDates {
+		if d > today {
+			continue // future watering (clock skew / hand edit): ignore
+		}
+		if floor != "" && d <= floor {
+			continue // predates or coincides with the last commit day
+		}
+		count++
+	}
+	if count > plant.MaxGraceDays {
+		count = plant.MaxGraceDays
+	}
+	return count
+}
+
+// WaterResult describes the outcome of a Water call so the CLI can report it.
+type WaterResult struct {
+	// Applied is true when this call recorded a new grace day. It is false
+	// when watering was a no-op (already watered today, or already at the
+	// grace cap), in which case Reason explains why.
+	Applied bool
+
+	// Reason is a short, human-readable explanation when Applied is false.
+	Reason string
+
+	// Grace is the effective grace-day count after this call.
+	Grace int
+}
+
+// Water records a watering for now's calendar day and returns the updated State
+// alongside a WaterResult describing what happened. It is deliberately
+// conservative to prevent gaming the streak:
+//
+//   - Watering is idempotent per day: a second call on the same date is a
+//     no-op (you cannot bank multiple grace days from one day of watering).
+//   - Watering is capped: once effective grace is at plant.MaxGraceDays,
+//     further watering is refused until a commit resets the dry spell.
+//
+// lastCommit is the most recent commit time (zero when none), used only to
+// scope the cap check to the current gap. The returned State is normalized and
+// ready to Save; the receiver is not mutated.
+func (s State) Water(now time.Time, lastCommit time.Time) (State, WaterResult) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	today := dayStamp(now)
+
+	// Already watered today? Idempotent no-op.
+	for _, d := range s.WateredDates {
+		if d == today {
+			return normalize(s), WaterResult{
+				Applied: false,
+				Reason:  "already watered today",
+				Grace:   s.EffectiveGrace(now, lastCommit),
+			}
+		}
+	}
+
+	// At the cap already? Refuse rather than silently banking a date that
+	// would never take effect.
+	if s.EffectiveGrace(now, lastCommit) >= plant.MaxGraceDays {
+		return normalize(s), WaterResult{
+			Applied: false,
+			Reason:  "grace is already at the maximum",
+			Grace:   plant.MaxGraceDays,
+		}
+	}
+
+	out := s
+	out.WateredDates = append(append([]string(nil), s.WateredDates...), today)
+	out = normalize(out)
+	return out, WaterResult{
+		Applied: true,
+		Grace:   out.EffectiveGrace(now, lastCommit),
+	}
+}
+
+// dayStamp formats a time as a YYYY-MM-DD calendar-day key in its own location.
+func dayStamp(t time.Time) string {
+	return t.Format("2006-01-02")
 }
 
 // FromPlant folds a freshly computed result back into this persisted State,
@@ -141,9 +275,33 @@ func (s State) FromPlant(ps plant.PlantState, lastCommitHash string, lastCommitT
 	if !lastCommitTime.IsZero() {
 		out.LastCommitTime = lastCommitTime
 		out.LastCommitHash = lastCommitHash
+
+		// A fresh commit ends the current dry spell, so any watering-can
+		// grace from on/before the commit day has served its purpose and is
+		// pruned. This is what stops watering from being banked across
+		// commits into a permanent reprieve.
+		out.WateredDates = pruneWaterings(out.WateredDates, lastCommitTime)
 	}
 
-	return out
+	return normalize(out)
+}
+
+// pruneWaterings drops any watering dated on or before the last commit's
+// calendar day, keeping only waterings that belong to the dry spell *after*
+// the commit. The commit time is compared in its own location, matching how
+// EffectiveGrace scopes grace.
+func pruneWaterings(dates []string, lastCommit time.Time) []string {
+	if len(dates) == 0 || lastCommit.IsZero() {
+		return dates
+	}
+	floor := dayStamp(lastCommit)
+	kept := dates[:0:0]
+	for _, d := range dates {
+		if d > floor {
+			kept = append(kept, d)
+		}
+	}
+	return kept
 }
 
 // DefaultPath returns the XDG-aware default path to the state file:
@@ -280,7 +438,39 @@ func normalize(s State) State {
 	if s.BestStreak < 0 {
 		s.BestStreak = 0
 	}
+	s.WateredDates = normalizeWaterings(s.WateredDates)
 	return s
+}
+
+// normalizeWaterings de-duplicates and sorts watering dates ascending, drops
+// obviously invalid entries (anything not parseable as YYYY-MM-DD), and keeps
+// only the most recent MaxWateredDatesKept so a long-lived state file cannot
+// accumulate unbounded history. A nil/empty input stays nil so the field is
+// omitted from JSON.
+func normalizeWaterings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, d := range in {
+		if _, err := time.Parse("2006-01-02", d); err != nil {
+			continue // skip garbage / hand-edited nonsense
+		}
+		if _, dup := seen[d]; dup {
+			continue
+		}
+		seen[d] = struct{}{}
+		out = append(out, d)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out) // lexical sort == chronological for zero-padded ISO dates
+	if len(out) > MaxWateredDatesKept {
+		out = out[len(out)-MaxWateredDatesKept:]
+	}
+	return out
 }
 
 // parseStage maps a stored stage name back to a plant.Stage. Unknown or empty
