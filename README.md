@@ -32,7 +32,7 @@ commit-sprout            # render the current plant for the repo you're in
 commit-sprout status     # streak, last commit, days until it wilts
 commit-sprout prompt     # compact glyph for your shell prompt / tmux status
 commit-sprout --prompt   # same thing, as a flag (handy inside a prompt string)
-commit-sprout water      # (planned) buy a grace day before wilting
+commit-sprout water      # buy a grace day before wilting (weekends / PTO)
 ```
 
 `status` prints a plain, script-friendly summary:
@@ -43,6 +43,37 @@ streak:  6 days (best: 11 days)
 last:    today (2026-07-04)
 health:  healthy — 2 days of cushion before it gets thirsty
 ```
+
+After watering, `status` also reports the grace in effect and the projected
+wilt date:
+
+```text
+stage:   leafy (healthy)
+streak:  6 days (best: 11 days)
+last:    2 days ago (2026-07-03)
+grace:   1 day (watered)
+health:  healthy — commit today to stay ahead of thirst
+wilts:   2026-07-08
+```
+
+### Watering can (grace days)
+
+Heading into a weekend or PTO and don't want your plant to droop? Water it:
+
+```bash
+commit-sprout water
+```
+
+Each watering buys **one extra idle day** before the plant turns thirsty and,
+later, wilts. It is deliberately hard to abuse, so it nudges *health* without
+ever faking *progress*:
+
+- **One per day** — watering twice on the same day is a no-op.
+- **Capped** — at most two grace days can be in effect at once.
+- **Self-resetting** — a fresh commit clears any grace, so you can't bank
+  waterings across commits into a permanent green streak.
+- **Health only** — grace never changes your growth stage or streak count; it
+  just keeps a watered plant perky through a planned break.
 
 `prompt` prints a single glyph + stage (e.g. `ل leafy`). It is built for the
 hot path: **read-only by default** (a prompt renders on every command, so it

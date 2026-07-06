@@ -104,7 +104,7 @@ func runPipeline() (pipelineResult, error) {
 	}
 
 	now := time.Now()
-	ps := plant.Compute(act, persisted.Plant(), now)
+	ps := plant.Compute(act, persisted.Plant(now, act.LastCommit), now)
 
 	return pipelineResult{
 		activity:  act,
@@ -114,6 +114,15 @@ func runPipeline() (pipelineResult, error) {
 		plant:     ps,
 		now:       now,
 	}, nil
+}
+
+// recomputeWith re-runs the pure plant computation for an already-read pipeline
+// result but with a different persisted State (e.g. after watering). It reuses
+// the same activity and reference clock so only the state-derived inputs (like
+// grace days) change, giving callers an updated PlantState without touching git
+// again.
+func recomputeWith(r pipelineResult, updated store.State) plant.PlantState {
+	return plant.Compute(r.activity, updated.Plant(r.now, r.activity.LastCommit), r.now)
 }
 
 // persist folds the computed plant state back into the remembered file, unless
@@ -251,4 +260,5 @@ func init() {
 	// Subcommands (M6): status + prompt ride the shared pipeline.
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(promptCmd)
+	rootCmd.AddCommand(waterCmd)
 }

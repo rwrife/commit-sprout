@@ -237,6 +237,89 @@ func TestClockSkewFutureCommitIsToday(t *testing.T) {
 	}
 }
 
+// TestGraceShiftsHealthThresholds verifies that watering-can grace days rewind
+// the effective dry spell so a plant tolerates that many extra idle days before
+// turning thirsty and, later, wilting.
+func TestGraceShiftsHealthThresholds(t *testing.T) {
+	cases := []struct {
+		name     string
+		lastDays int
+		grace    int
+		want     Health
+	}{
+		// Without grace, day 2 is thirsty and day 4 wilts (see TestHealthByRecency).
+		{"2 idle, 1 grace -> healthy", 2, 1, Healthy},
+		{"3 idle, 1 grace -> thirsty", 3, 1, Thirsty},
+		{"4 idle, 1 grace -> thirsty", 4, 1, Thirsty},
+		{"5 idle, 1 grace -> wilting", 5, 1, Wilting},
+		{"4 idle, 2 grace -> thirsty", 4, 2, Thirsty},
+		{"3 idle, 2 grace -> healthy", 3, 2, Healthy},
+		{"5 idle, 2 grace -> thirsty", 5, 2, Thirsty},
+		{"6 idle, 2 grace -> wilting", 6, 2, Wilting},
+		// Grace is capped at MaxGraceDays; extra grace can't help further.
+		{"9 idle, 5 grace (capped at 2) -> wilting", 9, 5, Wilting},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := act(7, 10, tc.lastDays, true)
+			got := Compute(a, State{GraceDays: tc.grace}, fixedNow)
+			if got.Health != tc.want {
+				t.Errorf("Health = %v; want %v (idle=%d grace=%d)",
+					got.Health, tc.want, tc.lastDays, tc.grace)
+			}
+		})
+	}
+}
+
+// TestGraceIsClampedAndSurfaced checks that the effective grace is clamped to
+// [0, MaxGraceDays] and reported back on the PlantState for status output.
+func TestGraceIsClampedAndSurfaced(t *testing.T) {
+	a := act(7, 10, 2, true)
+
+	over := Compute(a, State{GraceDays: 99}, fixedNow)
+	if over.GraceDays != MaxGraceDays {
+		t.Errorf("over-cap GraceDays = %d; want %d", over.GraceDays, MaxGraceDays)
+	}
+
+	neg := Compute(a, State{GraceDays: -4}, fixedNow)
+	if neg.GraceDays != 0 {
+		t.Errorf("negative GraceDays = %d; want 0", neg.GraceDays)
+	}
+}
+
+// TestGraceNeverAffectsStreak is the anti-gaming guarantee: grace changes only
+// health, never the reported streak, and never lets the stage exceed the
+// remembered peak.
+func TestGraceNeverAffectsStreak(t *testing.T) {
+	// A wilting plant (4 idle days) with an established leafy peak: grace can
+	// lift it out of wilting, but must not inflate the streak number.
+	a := act(3, 5, 4, true) // streak 3 => Leafy live, 4 idle days
+
+	bare := Compute(a, State{HighestStage: Leafy}, fixedNow)
+	watered := Compute(a, State{HighestStage: Leafy, GraceDays: MaxGraceDays}, fixedNow)
+
+	if watered.Streak != bare.Streak {
+		t.Errorf("grace changed Streak: %d -> %d", bare.Streak, watered.Streak)
+	}
+	if watered.Streak != a.Streak {
+		t.Errorf("Streak = %d; want %d (raw activity)", watered.Streak, a.Streak)
+	}
+	// Health improves with grace: 4 idle days is Wilting bare, but with 2 grace
+	// the effective idle is 2 -> Thirsty (a real improvement, one step better).
+	if bare.Health != Wilting {
+		t.Errorf("bare Health = %v; want Wilting", bare.Health)
+	}
+	if watered.Health != Thirsty {
+		t.Errorf("watered Health = %v; want Thirsty", watered.Health)
+	}
+	// Neither stage may exceed the remembered peak: grace never fakes growth,
+	// it only changes how healthy the plant looks.
+	if watered.Stage > Leafy || bare.Stage > Leafy {
+		t.Errorf("grace/health must not exceed remembered peak Leafy; bare=%v watered=%v",
+			bare.Stage, watered.Stage)
+	}
+}
+
 func TestStageAndHealthStringsStable(t *testing.T) {
 	stages := map[Stage]string{
 		Seed: "seed", Sprout: "sprout", Leafy: "leafy",
