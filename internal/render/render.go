@@ -44,6 +44,12 @@ type Options struct {
 	// caption. The zero value means "no commits yet" and is rendered as a
 	// friendly seed-planting nudge.
 	LastCommit time.Time
+
+	// Width is the terminal width (in columns) available for multi-plant
+	// garden layout. It is only consulted by Garden; single-plant Frame
+	// ignores it. Zero or negative means "unknown", and Garden falls back to
+	// DefaultGardenWidth.
+	Width int
 }
 
 // Seedling returns the hard-coded ASCII seedling frame (the healthy Seed art).
@@ -351,4 +357,262 @@ func colorizeArt(art string, ps plant.PlantState) string {
 // colorizeCaption dims the caption block so the plant stays the focal point.
 func colorizeCaption(caption string, _ plant.PlantState) string {
 	return captionStyle.Render(caption)
+}
+
+// --- garden (multi-repo windowsill) -----------------------------------------
+//
+// Garden renders several plants side by side as a row (a "windowsill"), each
+// under its repo label with a compact one-plant caption. It reuses the same
+// per-stage/health art as the single-plant Frame so a garden plant looks
+// identical to its solo view, just laid out in a grid.
+
+// gardenGutter is the number of spaces placed between adjacent plants in a row.
+const gardenGutter = 3
+
+// DefaultGardenWidth is the terminal width assumed when a caller does not know
+// the real one (Options.Width <= 0). 80 columns is the classic safe default and
+// keeps the row from sprawling when output is piped or width detection fails.
+const DefaultGardenWidth = 80
+
+// GardenPlant is one entry in a garden: a repo's resolved plant state plus the
+// label (typically the repo directory name) to caption it with.
+type GardenPlant struct {
+	// Label is the short name shown above the plant (e.g. the repo dir name).
+	Label string
+
+	// State is the computed plant to render for this repo.
+	State plant.PlantState
+
+	// LastCommit is the repo's most recent commit time, used for this
+	// plant's compact caption. The zero value renders as "no commits yet".
+	LastCommit time.Time
+}
+
+// Garden renders plants as one or more rows of side-by-side cells, wrapping to
+// the next row when the next cell would exceed opt.Width (falling back to
+// DefaultGardenWidth when opt.Width <= 0). It is deterministic given its inputs.
+//
+// An empty plants slice yields a friendly "empty windowsill" line rather than a
+// blank string, so callers can print the result unconditionally.
+func Garden(plants []GardenPlant, opt Options) string {
+	if len(plants) == 0 {
+		return "No repos in the garden yet \u2014 add some with `commit-sprout garden --add <path>`\n" +
+			"or pass repo paths: `commit-sprout garden <path> <path>`."
+	}
+
+	width := opt.Width
+	if width <= 0 {
+		width = DefaultGardenWidth
+	}
+
+	cells := make([]string, len(plants))
+	for i, p := range plants {
+		cells[i] = gardenCell(p, opt)
+	}
+
+	rows := packRows(cells, width)
+	blocks := make([]string, len(rows))
+	for i, row := range rows {
+		blocks[i] = joinSideBySide(row, gardenGutter)
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+// gardenCell builds the full text block for a single garden plant: a centered
+// label, the stage/health art, and a compact two-line caption. The block is a
+// rectangle (all lines padded to equal width) so cells align cleanly when set
+// beside one another.
+func gardenCell(p GardenPlant, opt Options) string {
+	art := artFor(p.State.Stage, p.State.Health)
+	if opt.Color {
+		art = colorizeArt(art, p.State)
+	}
+
+	caption := gardenCaption(p, opt)
+	if opt.Color {
+		caption = captionStyle.Render(caption)
+	}
+
+	label := gardenLabel(p.Label)
+	if opt.Color {
+		label = captionStyle.Render(label)
+	}
+
+	block := label + "\n" + art + "\n" + caption
+	return padBlock(block)
+}
+
+// gardenLabel formats the repo name shown above a garden plant, truncating
+// overly long names so a single cell cannot dominate the row width.
+func gardenLabel(name string) string {
+	const max = 16
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "(repo)"
+	}
+	r := []rune(name)
+	if len(r) > max {
+		name = string(r[:max-1]) + "\u2026"
+	}
+	return name
+}
+
+// gardenCaption is the compact per-plant caption used in a garden: stage/health
+// on one line and a short last-commit phrase on the next. It intentionally
+// omits the mood and multi-line hints that the full single-plant Frame shows,
+// keeping each cell narrow.
+func gardenCaption(p GardenPlant, opt Options) string {
+	opt.LastCommit = p.LastCommit
+	last := lastCommitPhrase(p.State, opt)
+	if len(last) > 22 {
+		// The parenthetical date is the least essential part in a tight
+		// cell; drop it when the phrase runs long.
+		if idx := strings.Index(last, " ("); idx > 0 {
+			last = last[:idx]
+		}
+	}
+	return fmt.Sprintf("%s/%s\n%s", p.State.Stage, p.State.Health, last)
+}
+
+// packRows greedily groups cells into rows so that each row's total rendered
+// width (cells plus gutters) stays within width. A single cell wider than width
+// still occupies its own row rather than being dropped. Order is preserved.
+func packRows(cells []string, width int) [][]string {
+	var rows [][]string
+	var cur []string
+	curWidth := 0
+
+	for _, c := range cells {
+		cw := blockWidth(c)
+		add := cw
+		if len(cur) > 0 {
+			add += gardenGutter
+		}
+		if len(cur) > 0 && curWidth+add > width {
+			rows = append(rows, cur)
+			cur = nil
+			curWidth = 0
+			add = cw
+		}
+		cur = append(cur, c)
+		curWidth += add
+	}
+	if len(cur) > 0 {
+		rows = append(rows, cur)
+	}
+	return rows
+}
+
+// joinSideBySide places rectangular text blocks next to each other separated by
+// a gutter of spaces, top-aligned. Blocks of unequal height are bottom-padded
+// with blank lines so every block contributes the same number of rows.
+func joinSideBySide(blocks []string, gutter int) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	if len(blocks) == 1 {
+		return blocks[0]
+	}
+
+	split := make([][]string, len(blocks))
+	height := 0
+	for i, b := range blocks {
+		lines := strings.Split(b, "\n")
+		split[i] = lines
+		if len(lines) > height {
+			height = len(lines)
+		}
+	}
+
+	sep := strings.Repeat(" ", gutter)
+	var out strings.Builder
+	for row := 0; row < height; row++ {
+		for i, lines := range split {
+			if i > 0 {
+				out.WriteString(sep)
+			}
+			if row < len(lines) {
+				out.WriteString(lines[row])
+			} else {
+				// Pad missing lines to this block's width so later
+				// columns still line up.
+				out.WriteString(strings.Repeat(" ", blockWidth(blocks[i])))
+			}
+		}
+		if row < height-1 {
+			out.WriteByte('\n')
+		}
+	}
+	return out.String()
+}
+
+// padBlock right-pads every line of a block to the block's maximum line width,
+// turning ragged text into a clean rectangle so it tiles correctly beside other
+// blocks. Width is measured in printable columns (see visibleWidth) so ANSI
+// color codes and wide runes do not skew the padding.
+func padBlock(block string) string {
+	lines := strings.Split(block, "\n")
+	w := 0
+	for _, ln := range lines {
+		if vw := visibleWidth(ln); vw > w {
+			w = vw
+		}
+	}
+	for i, ln := range lines {
+		if pad := w - visibleWidth(ln); pad > 0 {
+			lines[i] = ln + strings.Repeat(" ", pad)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// blockWidth returns the maximum printable width across a block's lines.
+func blockWidth(block string) int {
+	w := 0
+	for _, ln := range strings.Split(block, "\n") {
+		if vw := visibleWidth(ln); vw > w {
+			w = vw
+		}
+	}
+	return w
+}
+
+// visibleWidth returns the number of printable columns in s, ignoring ANSI SGR
+// escape sequences (e.g. lipgloss color codes) so colored and plain cells pad
+// to the same width. It counts runes rather than bytes; the plant art is ASCII
+// plus a handful of BMP symbols, all single-width, so a rune count is accurate
+// here without pulling in a full east-asian-width dependency.
+//
+// It recognizes CSI sequences of the form ESC '[' ... final, where the final
+// byte is in the range 0x40..0x7E. The '[' introducer immediately after ESC is
+// consumed rather than treated as a terminator, so short codes like "\x1b[2m"
+// are skipped in full.
+func visibleWidth(s string) int {
+	n := 0
+	// esc state: 0 = normal, 1 = just saw ESC, 2 = inside CSI params.
+	esc := 0
+	for _, r := range s {
+		switch esc {
+		case 1:
+			if r == '[' {
+				esc = 2 // CSI; consume until a final byte
+			} else {
+				esc = 0 // a non-CSI escape; stop skipping
+			}
+			continue
+		case 2:
+			// Parameter/intermediate bytes are 0x20..0x3F; the sequence
+			// ends at the first final byte in 0x40..0x7E.
+			if r >= '@' && r <= '~' {
+				esc = 0
+			}
+			continue
+		}
+		if r == '\x1b' {
+			esc = 1
+			continue
+		}
+		n++
+	}
+	return n
 }

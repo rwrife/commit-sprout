@@ -284,3 +284,22 @@ func TestParseLogLargeWindowStreak(t *testing.T) {
 		t.Errorf("TotalInWindow = %d; want 3", act.TotalInWindow)
 	}
 }
+
+func TestRepoNameBaseName(t *testing.T) {
+	if got := RepoName("/home/user/code/myrepo"); got != "myrepo" {
+		t.Errorf("RepoName(/home/user/code/myrepo) = %q; want myrepo", got)
+	}
+	if got := RepoName("/home/user/code/myrepo/"); got != "myrepo" {
+		t.Errorf("RepoName with trailing slash = %q; want myrepo", got)
+	}
+}
+
+func TestRepoNameEmptyFallsBackToCwdBase(t *testing.T) {
+	// "." and "" resolve to the current working directory's base name; we
+	// don't assert the exact value (it varies) but it must be non-empty.
+	for _, in := range []string{"", "."} {
+		if got := RepoName(in); got == "" {
+			t.Errorf("RepoName(%q) returned empty; want the cwd base name", in)
+		}
+	}
+}

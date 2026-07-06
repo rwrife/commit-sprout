@@ -33,6 +33,7 @@ commit-sprout status     # streak, last commit, days until it wilts
 commit-sprout prompt     # compact glyph for your shell prompt / tmux status
 commit-sprout --prompt   # same thing, as a flag (handy inside a prompt string)
 commit-sprout water      # buy a grace day before wilting (weekends / PTO)
+commit-sprout garden     # a row of plants, one per repo (a windowsill)
 ```
 
 `status` prints a plain, script-friendly summary:
@@ -80,6 +81,56 @@ hot path: **read-only by default** (a prompt renders on every command, so it
 skips the state write unless you pass `--save`) and it **fails silently outside
 a git repo** — it prints nothing and exits `0`, so it can never break your
 shell. Drop it in and forget it.
+
+### Multi-repo garden (windowsill)
+
+Most people ship across more than one repo. `commit-sprout garden` renders a
+row of small plants — one per repository — so you can eyeball your cadence
+everywhere at once:
+
+```bash
+commit-sprout garden ~/code/foo ~/code/bar   # explicit repos, side by side
+commit-sprout garden --scan ~/code           # scan a parent dir one level deep
+commit-sprout garden                         # render your saved garden
+```
+
+Example:
+
+```text
+foo                  bar
+   \|/                  ,
+    |                  /|
+   _|_                ' |
+  (   )                _|_
+   '-'               (   )
+seed/healthy          '-'
+no commits yet     leafy/healthy
+                   today (2026-07-06)
+```
+
+Save a set of repos so plain `garden` just works, and manage it over time:
+
+```bash
+commit-sprout garden --add ~/code/foo ~/code/bar   # remember these repos
+commit-sprout garden --add                         # remember the current repo
+commit-sprout garden --remove ~/code/bar           # forget one
+commit-sprout garden --list                        # show the saved set
+```
+
+Details:
+
+- **Repo resolution order:** explicit path args → `--scan <dir>` → your saved
+  set. Whichever is present first wins.
+- **Per-repo identity:** each repo is scored against *its own*
+  `git config user.email` by default, so a garden of repos you committed under
+  different addresses still counts correctly. Pass `--author <email>` to score
+  every repo against one address instead.
+- **Read-only:** the garden is a glance, not a writer — it never changes any
+  repo's remembered plant state. The saved *repo list* lives in the same state
+  file as everything else (`garden_repos`).
+- **Layout:** plants wrap onto multiple rows to fit your terminal width
+  (honoring `$COLUMNS`), and color / `--no-color` / `NO_COLOR` behave exactly
+  like the single-plant view.
 
 ## Install
 
@@ -197,7 +248,13 @@ Go + cobra + lipgloss. Boring and fast, because this might run on every shell pr
 ## Roadmap
 
 See [PLAN.md](./PLAN.md) for the full plan, milestones (M1–M6), and the v0.2+ backlog
-(multi-repo gardens, species, pests, brag export, and more).
+(species, pests, brag export, and more).
+
+**Shipped since v0.1 (v0.2 backlog):**
+
+- **Watering can** (`commit-sprout water`) — buy bounded grace days for planned breaks.
+- **Multi-repo garden** (`commit-sprout garden`) — a windowsill of plants, one per repo,
+  with a saveable repo set and per-repo author identity.
 
 ## License
 
