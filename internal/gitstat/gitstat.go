@@ -16,7 +16,9 @@ package gitstat
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -105,25 +107,41 @@ type commit struct {
 }
 
 // Read returns the Activity for the git repository in the current working
-// directory. When author is empty it defaults to the configured
-// `git config user.email`. windowDays <= 0 falls back to DefaultWindowDays.
+// directory. It is a thin convenience wrapper over ReadAt(".", ...); see that
+// function for the parameter semantics.
 //
 // Read shells out to git; the parsing it relies on is exercised directly by
 // tests via parseLog, so this thin wrapper needs no live-repo test.
 func Read(author string, windowDays int) (Activity, error) {
+	return ReadAt(".", author, windowDays)
+}
+
+// ReadAt returns the Activity for the git repository rooted at dir. An empty
+// dir is treated as the current working directory. When author is empty it
+// defaults to that repository's configured `git config user.email`, so
+// per-repo author identities are honored (each repo in a garden may have been
+// committed under a different address). windowDays <= 0 falls back to
+// DefaultWindowDays.
+//
+// Like Read, ReadAt only orchestrates git and delegates the interesting work
+// to the pure parseLog, so it needs no live-repo test of its own.
+func ReadAt(dir, author string, windowDays int) (Activity, error) {
 	if windowDays <= 0 {
 		windowDays = DefaultWindowDays
 	}
+	if dir == "" {
+		dir = "."
+	}
 
-	if err := ensureRepo(); err != nil {
+	if err := ensureRepo(dir); err != nil {
 		return Activity{}, err
 	}
 
 	if author == "" {
-		author = configuredEmail()
+		author = configuredEmail(dir)
 	}
 
-	raw, err := runLog(author, windowDays)
+	raw, err := runLog(dir, author, windowDays)
 	if err != nil {
 		return Activity{}, err
 	}
@@ -131,30 +149,34 @@ func Read(author string, windowDays int) (Activity, error) {
 	return parseLog(raw, author, time.Now(), windowDays), nil
 }
 
-// ensureRepo verifies the current directory is inside a git working tree,
-// translating git's failure into the friendly ErrNotARepo sentinel.
-func ensureRepo() error {
+// ensureRepo verifies dir is inside a git working tree, translating git's
+// failure into the friendly ErrNotARepo sentinel.
+func ensureRepo(dir string) error {
 	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
 		return ErrNotARepo
 	}
 	return nil
 }
 
-// configuredEmail returns `git config user.email`, or "" if it is unset. An
-// empty author simply means "do not filter by author" downstream.
-func configuredEmail() string {
-	out, err := exec.Command("git", "config", "user.email").Output()
+// configuredEmail returns dir's `git config user.email`, or "" if it is unset.
+// An empty author simply means "do not filter by author" downstream.
+func configuredEmail(dir string) string {
+	cmd := exec.Command("git", "config", "user.email")
+	cmd.Dir = dir
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
 }
 
-// runLog runs `git log` and returns its raw stdout. It fetches enough history
-// to compute a long streak accurately (streakLookbackDays), even when the
-// aggregate window is small; parseLog then bounds the aggregates to the window.
-func runLog(author string, windowDays int) (string, error) {
+// runLog runs `git log` in dir and returns its raw stdout. It fetches enough
+// history to compute a long streak accurately (streakLookbackDays), even when
+// the aggregate window is small; parseLog then bounds the aggregates to the
+// window.
+func runLog(dir, author string, windowDays int) (string, error) {
 	lookback := windowDays
 	if streakLookbackDays > lookback {
 		lookback = streakLookbackDays
@@ -173,11 +195,32 @@ func runLog(author string, windowDays int) (string, error) {
 		args = append(args, "--author="+author)
 	}
 
-	out, err := exec.Command("git", args...).Output()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("gitstat: git log failed: %w", err)
 	}
 	return string(out), nil
+}
+
+// RepoName returns a short, human-friendly label for a repo directory, used as
+// the caption above each plant in a garden. It resolves dir to an absolute path
+// and takes its base name, falling back to the raw input when resolution fails
+// (e.g. dir does not exist) so a label is always produced.
+func RepoName(dir string) string {
+	if dir == "" || dir == "." {
+		if wd, err := os.Getwd(); err == nil {
+			return filepath.Base(wd)
+		}
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		base := filepath.Base(abs)
+		if base != "." && base != string(filepath.Separator) {
+			return base
+		}
+	}
+	return dir
 }
 
 // parseLog turns raw `git log` output into an Activity. It is pure: all clock

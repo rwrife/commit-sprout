@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/rwrife/commit-sprout/internal/plant"
@@ -92,6 +93,15 @@ type State struct {
 	// the most recent MaxWateredDatesKept entries are retained so the file
 	// cannot grow without bound.
 	WateredDates []string `json:"watered_dates,omitempty"`
+
+	// GardenRepos is the user's saved set of repository paths for the
+	// multi-repo garden view (`commit-sprout garden` with no path arguments).
+	// Paths are stored absolute and de-duplicated by normalize so the list is
+	// stable regardless of the directory the command was run from. It is
+	// purely a convenience list of *where* to look; no per-repo plant memory
+	// is persisted here (the garden is a read-only glance), which keeps this
+	// additive and backward-compatible with existing state files.
+	GardenRepos []string `json:"garden_repos,omitempty"`
 }
 
 // MaxWateredDatesKept bounds how many watering dates are retained on disk. Only
@@ -439,7 +449,79 @@ func normalize(s State) State {
 		s.BestStreak = 0
 	}
 	s.WateredDates = normalizeWaterings(s.WateredDates)
+	s.GardenRepos = normalizeRepos(s.GardenRepos)
 	return s
+}
+
+// normalizeRepos cleans, absolutizes, and de-duplicates the saved garden repo
+// paths, preserving first-seen order so the windowsill layout is stable across
+// runs. Blank entries are dropped; paths that cannot be absolutized are kept as
+// given (cleaned) so a still-useful relative path is never silently discarded.
+// A nil/empty input stays nil so the field is omitted from JSON.
+func normalizeRepos(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		} else {
+			p = filepath.Clean(p)
+		}
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// AddGardenRepos returns a copy of the state with the given paths added to the
+// saved garden set (absolutized and de-duplicated by normalize). It reports how
+// many paths were newly added so the CLI can give accurate feedback. The
+// receiver is not mutated.
+func (s State) AddGardenRepos(paths ...string) (State, int) {
+	before := len(normalizeRepos(s.GardenRepos))
+	out := s
+	out.GardenRepos = append(append([]string(nil), s.GardenRepos...), paths...)
+	out = normalize(out)
+	return out, len(out.GardenRepos) - before
+}
+
+// RemoveGardenRepos returns a copy of the state with the given paths removed
+// from the saved garden set, matching on the same absolutized form used for
+// storage so a relative path removes its absolute equivalent. It reports how
+// many entries were actually removed. The receiver is not mutated.
+func (s State) RemoveGardenRepos(paths ...string) (State, int) {
+	if len(s.GardenRepos) == 0 || len(paths) == 0 {
+		return normalize(s), 0
+	}
+	drop := make(map[string]struct{}, len(paths))
+	for _, p := range normalizeRepos(paths) {
+		drop[p] = struct{}{}
+	}
+	cur := normalizeRepos(s.GardenRepos)
+	kept := make([]string, 0, len(cur))
+	for _, p := range cur {
+		if _, gone := drop[p]; gone {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	out := s
+	out.GardenRepos = kept
+	out = normalize(out)
+	return out, len(cur) - len(kept)
 }
 
 // normalizeWaterings de-duplicates and sorts watering dates ascending, drops
