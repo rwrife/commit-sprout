@@ -102,6 +102,13 @@ type State struct {
 	// is persisted here (the garden is a read-only glance), which keeps this
 	// additive and backward-compatible with existing state files.
 	GardenRepos []string `json:"garden_repos,omitempty"`
+
+	// Species is the remembered default species name (e.g. "cactus") set via
+	// `commit-sprout --species <name>`. It is stored by its stable lowercase
+	// name so the file stays readable and resilient to enum reordering. Empty
+	// means "unset", which the caller resolves to the default species. It is
+	// additive and optional, so older state files load unchanged.
+	Species string `json:"species,omitempty"`
 }
 
 // MaxWateredDatesKept bounds how many watering dates are retained on disk. Only

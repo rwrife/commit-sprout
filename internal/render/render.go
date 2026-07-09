@@ -17,6 +17,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rwrife/commit-sprout/internal/plant"
+	"github.com/rwrife/commit-sprout/internal/species"
 )
 
 // seedling is the original M1 hard-coded plant: a tiny sprout in a pot. It is
@@ -50,6 +51,10 @@ type Options struct {
 	// ignores it. Zero or negative means "unknown", and Garden falls back to
 	// DefaultGardenWidth.
 	Width int
+
+	// Species selects which art set to render. The zero value is the default
+	// species (fern), so callers that never set it get the historical art.
+	Species species.Kind
 }
 
 // Seedling returns the hard-coded ASCII seedling frame (the healthy Seed art).
@@ -68,7 +73,7 @@ func Seedling() string {
 // Rendering is deterministic given ps and opt. When opt.Color is false the
 // output is plain ASCII suitable for pipes, files, and CI snapshots.
 func Frame(ps plant.PlantState, opt Options) string {
-	art := artFor(ps.Stage, ps.Health)
+	art := species.ArtFor(opt.Species, ps.Stage, ps.Health)
 	caption := caption(ps, opt)
 
 	var b strings.Builder
@@ -386,6 +391,10 @@ type GardenPlant struct {
 	// LastCommit is the repo's most recent commit time, used for this
 	// plant's compact caption. The zero value renders as "no commits yet".
 	LastCommit time.Time
+
+	// Species selects this plant's art set. The zero value is the default
+	// species (fern), so existing callers are unaffected.
+	Species species.Kind
 }
 
 // Garden renders plants as one or more rows of side-by-side cells, wrapping to
@@ -423,7 +432,7 @@ func Garden(plants []GardenPlant, opt Options) string {
 // rectangle (all lines padded to equal width) so cells align cleanly when set
 // beside one another.
 func gardenCell(p GardenPlant, opt Options) string {
-	art := artFor(p.State.Stage, p.State.Health)
+	art := species.ArtFor(p.Species, p.State.Stage, p.State.Health)
 	if opt.Color {
 		art = colorizeArt(art, p.State)
 	}

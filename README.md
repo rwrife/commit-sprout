@@ -34,6 +34,7 @@ commit-sprout prompt     # compact glyph for your shell prompt / tmux status
 commit-sprout --prompt   # same thing, as a flag (handy inside a prompt string)
 commit-sprout water      # buy a grace day before wilting (weekends / PTO)
 commit-sprout garden     # a row of plants, one per repo (a windowsill)
+commit-sprout --species cactus   # pick your plant's species (remembered as default)
 ```
 
 `status` prints a plain, script-friendly summary:
@@ -131,6 +132,26 @@ Details:
 - **Layout:** plants wrap onto multiple rows to fit your terminal width
   (honoring `$COLUMNS`), and color / `--no-color` / `NO_COLOR` behave exactly
   like the single-plant view.
+
+### Species
+
+Pick what kind of plant you're growing. Each species has its own full art set
+(across every growth stage and wilt state), and one has a gameplay twist.
+
+```bash
+commit-sprout --species fern        # the default: upright and leafy
+commit-sprout --species cactus      # blocky and spiky — and drought-hardy
+commit-sprout --species bonsai      # a gnarled, sculptural little tree
+commit-sprout --species sunflower   # a tall stalk that ends in a big bloom
+```
+
+- **Remembered:** the species you choose is saved as your default (in the same
+  state file as everything else, under `species`), so later flag-less runs keep
+  rendering it. Pass `--species` again anytime to switch.
+- **Cactus twist:** a cactus tolerates much longer commit gaps before it wilts
+  (roughly a week and a half of silence vs. a few days for the leafier species).
+  It only bends the *health* thresholds — growth and streak still come from real
+  commits, so a cactus can't fake progress, just survive a drought.
 
 ## Install
 
@@ -255,6 +276,8 @@ See [PLAN.md](./PLAN.md) for the full plan, milestones (M1–M6), and the v0.2+ 
 - **Watering can** (`commit-sprout water`) — buy bounded grace days for planned breaks.
 - **Multi-repo garden** (`commit-sprout garden`) — a windowsill of plants, one per repo,
   with a saveable repo set and per-repo author identity.
+- **Species selection** (`commit-sprout --species`) — fern / cactus / bonsai / sunflower,
+  each with its own art set; the cactus survives droughts longer as a gameplay twist.
 
 ## License
 
