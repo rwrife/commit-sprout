@@ -6,6 +6,7 @@ require (
 	github.com/charmbracelet/lipgloss v0.13.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/sys v0.19.0
 )
 
 require (
@@ -17,5 +18,4 @@ require (
 	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
-	golang.org/x/sys v0.19.0 // indirect
 )

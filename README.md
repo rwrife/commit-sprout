@@ -33,6 +33,7 @@ commit-sprout status     # streak, last commit, days until it wilts
 commit-sprout prompt     # compact glyph for your shell prompt / tmux status
 commit-sprout --prompt   # same thing, as a flag (handy inside a prompt string)
 commit-sprout water      # buy a grace day before wilting (weekends / PTO)
+commit-sprout watch      # live full-screen view; the plant gently sways
 commit-sprout garden     # a row of plants, one per repo (a windowsill)
 commit-sprout --species cactus   # pick your plant's species (remembered as default)
 ```
@@ -76,6 +77,21 @@ ever faking *progress*:
   waterings across commits into a permanent green streak.
 - **Health only** — grace never changes your growth stage or streak count; it
   just keeps a watered plant perky through a planned break.
+
+### Watch mode (windowsill)
+
+```bash
+commit-sprout watch
+commit-sprout watch --interval 2s   # re-read git activity more often
+```
+
+`watch` opens a minimal full-screen view and lets the plant live: it **sways
+gently** and **re-reads your git activity on an interval** (default every 5s),
+so a fresh commit sprouts without you restarting anything. Press **q** or
+**Ctrl-C** to exit — the terminal (alternate screen, cursor, raw mode) is always
+restored on the way out. It stays cheap: frames are throttled and only redraw on
+change, so a still plant costs almost nothing. `watch` is read-only (it never
+persists state) and refuses to start when stdout is not a TTY.
 
 `prompt` prints a single glyph + stage (e.g. `ل leafy`). It is built for the
 hot path: **read-only by default** (a prompt renders on every command, so it
@@ -278,6 +294,8 @@ See [PLAN.md](./PLAN.md) for the full plan, milestones (M1–M6), and the v0.2+ 
   with a saveable repo set and per-repo author identity.
 - **Species selection** (`commit-sprout --species`) — fern / cactus / bonsai / sunflower,
   each with its own art set; the cactus survives droughts longer as a gameplay twist.
+- **Animated watch mode** (`commit-sprout watch`) — a live full-screen view where the
+  plant gently sways and re-reads git activity on an interval.
 
 ## License
 
