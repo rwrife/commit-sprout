@@ -11,12 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/rwrife/commit-sprout/internal/gitstat"
 	"github.com/rwrife/commit-sprout/internal/plant"
 	"github.com/rwrife/commit-sprout/internal/render"
+	"github.com/rwrife/commit-sprout/internal/species"
 	"github.com/rwrife/commit-sprout/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -42,6 +44,13 @@ var noSave bool
 // promptMode backs the --prompt flag on the root command, a convenience alias
 // for the `prompt` subcommand so it drops cleanly into a shell prompt string.
 var promptMode bool
+
+// speciesFlag backs the --species flag: the chosen plant species (fern /
+// cactus / bonsai / sunflower). Empty means "unset", in which case the saved
+// default from state (or the built-in default species) is used. When set to a
+// valid name it both renders as that species and is remembered as the new
+// default for future flag-less runs.
+var speciesFlag string
 
 // rootCmd is the base command invoked as `commit-sprout` with no subcommand.
 var rootCmd = &cobra.Command{
@@ -79,6 +88,7 @@ type pipelineResult struct {
 	pathErr   error
 	plant     plant.PlantState
 	now       time.Time
+	species   species.Kind
 }
 
 // runPipeline performs the shared read half of every command: read git
@@ -104,7 +114,36 @@ func runPipeline() (pipelineResult, error) {
 	}
 
 	now := time.Now()
-	ps := plant.Compute(act, persisted.Plant(now, act.LastCommit), now)
+
+	// Resolve the species: an explicit --species wins, otherwise fall back to
+	// the saved default, otherwise the built-in default. An unrecognized flag
+	// value is reported so a typo is not silently ignored.
+	sp := species.Default
+	if saved, ok := species.Parse(persisted.Species); ok {
+		sp = saved
+	}
+	if speciesFlag != "" {
+		chosen, ok := species.Parse(speciesFlag)
+		if !ok {
+			return pipelineResult{}, fmt.Errorf("unknown species %q (choose one of: %s)",
+				speciesFlag, strings.Join(species.Names(), ", "))
+		}
+		sp = chosen
+		// Remember the newly chosen species as the default for later runs.
+		persisted.Species = sp.String()
+	}
+
+	// Species can widen how long the plant tolerates a dry spell (the cactus
+	// twist). Growth is unaffected; only wilt thresholds move.
+	tune := plant.DefaultHealthTuning()
+	if st, ok := species.TuningFor(sp); ok {
+		tune = plant.HealthTuning{
+			ThirstyAfterDays: st.ThirstyAfterDays,
+			WiltingAfterDays: st.WiltingAfterDays,
+		}
+	}
+
+	ps := plant.ComputeWith(act, persisted.Plant(now, act.LastCommit), now, tune)
 
 	return pipelineResult{
 		activity:  act,
@@ -113,6 +152,7 @@ func runPipeline() (pipelineResult, error) {
 		pathErr:   pathErr,
 		plant:     ps,
 		now:       now,
+		species:   sp,
 	}, nil
 }
 
@@ -165,6 +205,7 @@ func renderPlant(cmd *cobra.Command) error {
 		Color:      useColor(cmd),
 		Now:        r.now,
 		LastCommit: r.activity.LastCommit,
+		Species:    r.species,
 	})
 	if _, perr := fmt.Fprintln(out, frame); perr != nil {
 		return perr
@@ -252,6 +293,11 @@ func init() {
 	// --prompt is a convenience alias for the `prompt` subcommand so the glyph
 	// drops straight into a shell prompt string.
 	rootCmd.Flags().BoolVar(&promptMode, "prompt", false, "emit a one-line glyph for shell prompt / tmux / starship")
+
+	// --species picks the plant's art set (and, for the cactus, its drought
+	// tolerance). A chosen species is remembered as the default for later runs.
+	rootCmd.PersistentFlags().StringVar(&speciesFlag, "species", "",
+		"plant species: "+strings.Join(species.Names(), " / ")+" (remembered as default)")
 
 	// Hidden M2 bridge: dump parsed git activity. Removed once M3+ consume it.
 	rootCmd.Flags().BoolVar(&showActivity, "activity", false, "print parsed git activity (debug)")

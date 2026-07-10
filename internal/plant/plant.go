@@ -212,9 +212,41 @@ type PlantState struct {
 // below its remembered peak, so neglect eventually shows in growth too -- but
 // never below Sprout once anything has ever grown.
 func Compute(act gitstat.Activity, st State, now time.Time) PlantState {
+	return ComputeWith(act, st, now, DefaultHealthTuning())
+}
+
+// HealthTuning carries the idle-day thresholds that decide when a plant turns
+// thirsty and then wilts. It exists so a species can bend the wilt rules (e.g.
+// a drought-hardy cactus) without the pure plant package importing the species
+// package, which would create an import cycle. Callers that have no species in
+// hand should pass DefaultHealthTuning().
+type HealthTuning struct {
+	// ThirstyAfterDays is the last idle day count still considered Healthy.
+	ThirstyAfterDays int
+	// WiltingAfterDays is the last idle day count still considered Thirsty;
+	// beyond it the plant Wilts.
+	WiltingAfterDays int
+}
+
+// DefaultHealthTuning returns the shared, historical wilt thresholds used when
+// a species offers no override. These match the package's original constants so
+// a default plant behaves exactly as before.
+func DefaultHealthTuning() HealthTuning {
+	return HealthTuning{
+		ThirstyAfterDays: thirstyAfterDays,
+		WiltingAfterDays: wiltingAfterDays,
+	}
+}
+
+// ComputeWith is Compute with an explicit HealthTuning so a species can widen
+// (or tighten) how long the plant tolerates a dry spell before wilting. Growth
+// (stage/streak) is unaffected -- only the health thresholds move -- so a
+// species twist can never fake progress, only resilience. It remains pure and
+// deterministic.
+func ComputeWith(act gitstat.Activity, st State, now time.Time, tune HealthTuning) PlantState {
 	days := daysSinceCommit(act, now)
 	grace := clampGrace(st.GraceDays)
-	health := healthFor(days, act.HasCommits, grace)
+	health := healthForTuned(days, act.HasCommits, grace, tune)
 	live := liveStage(act)
 
 	// Remember the tallest we've ever been (peak of memory and live growth).
@@ -306,6 +338,26 @@ func dayStart(t time.Time) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
 
+// healthForTuned is healthFor with explicit thresholds supplied by the caller
+// (typically from a species). See healthFor for the shared-default behavior.
+func healthForTuned(days int, hasCommits bool, grace int, tune HealthTuning) Health {
+	if !hasCommits || days < 0 {
+		return Healthy
+	}
+	effective := days - grace
+	if effective < 0 {
+		effective = 0
+	}
+	switch {
+	case effective <= tune.ThirstyAfterDays:
+		return Healthy
+	case effective <= tune.WiltingAfterDays:
+		return Thirsty
+	default:
+		return Wilting
+	}
+}
+
 // healthFor maps days-since-last-commit to a Health. With no commits at all the
 // plant is a fresh Seed and reported Healthy (there is nothing to wilt yet).
 //
@@ -314,23 +366,7 @@ func dayStart(t time.Time) time.Time {
 // days before drying out. Grace only moves the health thresholds; the caller
 // keeps Stage and Streak untouched, so watering can never fake growth.
 func healthFor(days int, hasCommits bool, grace int) Health {
-	if !hasCommits || days < 0 {
-		return Healthy
-	}
-	// Grace effectively rewinds the dry spell: two watered days make a
-	// four-day gap feel like two. Never let it drop below "committed today".
-	effective := days - grace
-	if effective < 0 {
-		effective = 0
-	}
-	switch {
-	case effective <= thirstyAfterDays:
-		return Healthy
-	case effective <= wiltingAfterDays:
-		return Thirsty
-	default:
-		return Wilting
-	}
+	return healthForTuned(days, hasCommits, grace, DefaultHealthTuning())
 }
 
 // clampGrace bounds a raw grace-day count into the supported [0, MaxGraceDays]
