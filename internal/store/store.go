@@ -564,20 +564,8 @@ func normalizeWaterings(in []string) []string {
 
 // parseStage maps a stored stage name back to a plant.Stage. Unknown or empty
 // names resolve to Seed, matching the "fresh plant" default and ensuring a
-// corrupt/hand-edited value can never crash or produce an invalid stage.
+// corrupt/hand-edited value can never crash or produce an invalid stage. It is
+// a thin alias for plant.ParseStage, kept for the store's internal call sites.
 func parseStage(name string) plant.Stage {
-	switch name {
-	case plant.Sprout.String():
-		return plant.Sprout
-	case plant.Leafy.String():
-		return plant.Leafy
-	case plant.Tall.String():
-		return plant.Tall
-	case plant.Blooming.String():
-		return plant.Blooming
-	case plant.Seed.String():
-		return plant.Seed
-	default:
-		return plant.Seed
-	}
+	return plant.ParseStage(name)
 }
