@@ -37,6 +37,7 @@ commit-sprout water      # buy a grace day before wilting (weekends / PTO)
 commit-sprout watch      # live full-screen view; the plant gently sways
 commit-sprout garden     # a row of plants, one per repo (a windowsill)
 commit-sprout --species cactus   # pick your plant's species (remembered as default)
+commit-sprout --season winter    # force a seasonal palette (default: derived from date)
 ```
 
 `status` prints a plain, script-friendly summary:
@@ -201,6 +202,39 @@ commit-sprout --species sunflower   # a tall stalk that ends in a big bloom
   It only bends the *health* thresholds — growth and streak still come from real
   commits, so a cactus can't fake progress, just survive a drought.
 
+### Seasons & themes
+
+The plant dresses for the time of year. `commit-sprout` derives a **season**
+purely from today's date and layers a light palette + ASCII decoration on top of
+the plant — falling leaves in autumn, snowflakes in winter, blossoms in spring,
+bright sun in summer:
+
+```
+$ commit-sprout --season winter --no-color
+  .  *  .  *  .
+   \ | /
+    \|/
+   --+--
+     |
+    _|_
+   (   )
+    '-'
+
+stage:  leafy (healthy)
+...
+```
+
+- **Date-driven by default:** Dec–Feb = winter, Mar–May = spring, Jun–Aug =
+  summer, Sep–Nov = autumn. No configuration needed.
+- **Force or preview:** `--season <winter|spring|summer|autumn>` (alias `fall`)
+  pins a season for testing or if you just like a different vibe.
+- **Disable it:** `--no-season` turns off all dressing for the neutral look.
+- **Holiday skins (opt-in):** `--holiday` layers a gentle extra sparkle/decoration
+  on the base season. It's off by default — no surprise decorations.
+- **Cosmetic only:** seasons *never* touch stage, health, or streak. It's pure
+  ambience layered on the same real, commit-driven plant, and it degrades to
+  plain ASCII under `--no-color` / `NO_COLOR` / piped output.
+
 ## Install
 
 ### Prebuilt binary (recommended)
@@ -328,6 +362,9 @@ See [PLAN.md](./PLAN.md) for the full plan, milestones (M1–M6), and the v0.2+ 
   each with its own art set; the cactus survives droughts longer as a gameplay twist.
 - **Animated watch mode** (`commit-sprout watch`) — a live full-screen view where the
   plant gently sways and re-reads git activity on an interval.
+- **Seasons & themes** (`commit-sprout --season` / `--no-season` / `--holiday`) —
+  date-driven cosmetic palettes and decorations (leaves, snow, blossoms), purely
+  ambient and never affecting the plant's state.
 
 ## License
 

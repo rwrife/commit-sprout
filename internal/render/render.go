@@ -17,6 +17,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rwrife/commit-sprout/internal/plant"
+	"github.com/rwrife/commit-sprout/internal/season"
 	"github.com/rwrife/commit-sprout/internal/species"
 )
 
@@ -55,6 +56,17 @@ type Options struct {
 	// Species selects which art set to render. The zero value is the default
 	// species (fern), so callers that never set it get the historical art.
 	Species species.Kind
+
+	// Season selects the cosmetic seasonal dressing (palette + decoration).
+	// The zero value (season.None) is a clean no-op that renders the neutral
+	// look, so existing callers are unaffected. Seasonal dressing never
+	// changes stage/health/streak — it is purely ambient.
+	Season season.Season
+
+	// Holiday enables gentle holiday skins layered on top of the base season.
+	// It is opt-in and off by default: no surprise decorations appear beyond
+	// the base season unless a caller explicitly sets this.
+	Holiday bool
 }
 
 // Seedling returns the hard-coded ASCII seedling frame (the healthy Seed art).
@@ -78,11 +90,11 @@ func Frame(ps plant.PlantState, opt Options) string {
 
 	var b strings.Builder
 	if opt.Color {
-		b.WriteString(colorizeArt(art, ps))
+		b.WriteString(dressArt(colorizeArt(art, ps), opt.Season, true, opt.Holiday))
 		b.WriteString("\n\n")
 		b.WriteString(colorizeCaption(caption, ps))
 	} else {
-		b.WriteString(art)
+		b.WriteString(dressArt(art, opt.Season, false, opt.Holiday))
 		b.WriteString("\n\n")
 		b.WriteString(caption)
 	}

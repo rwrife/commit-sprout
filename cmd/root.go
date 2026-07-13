@@ -18,6 +18,7 @@ import (
 	"github.com/rwrife/commit-sprout/internal/gitstat"
 	"github.com/rwrife/commit-sprout/internal/plant"
 	"github.com/rwrife/commit-sprout/internal/render"
+	"github.com/rwrife/commit-sprout/internal/season"
 	"github.com/rwrife/commit-sprout/internal/species"
 	"github.com/rwrife/commit-sprout/internal/store"
 	"github.com/spf13/cobra"
@@ -51,6 +52,20 @@ var promptMode bool
 // valid name it both renders as that species and is remembered as the new
 // default for future flag-less runs.
 var speciesFlag string
+
+// seasonFlag backs the --season flag: force a specific seasonal dressing
+// (winter / spring / summer / autumn) instead of deriving it from the current
+// date. Empty means "derive from now". It is cosmetic only and never persisted.
+var seasonFlag string
+
+// noSeason backs the --no-season flag, which disables seasonal dressing
+// entirely for a neutral look.
+var noSeason bool
+
+// holidaySkin backs the --holiday flag, an opt-in that layers gentle holiday
+// decorations on top of the base season. Off by default so no surprise
+// decorations appear beyond the base season.
+var holidaySkin bool
 
 // rootCmd is the base command invoked as `commit-sprout` with no subcommand.
 var rootCmd = &cobra.Command{
@@ -89,6 +104,7 @@ type pipelineResult struct {
 	plant     plant.PlantState
 	now       time.Time
 	species   species.Kind
+	season    season.Season
 }
 
 // runPipeline performs the shared read half of every command: read git
@@ -145,6 +161,22 @@ func runPipeline() (pipelineResult, error) {
 
 	ps := plant.ComputeWith(act, persisted.Plant(now, act.LastCommit), now, tune)
 
+	// Resolve the cosmetic season: --no-season disables it, an explicit
+	// --season forces one (reporting typos), otherwise derive it from now.
+	// This is purely ambient and never persisted.
+	sea := season.FromTime(now)
+	if seasonFlag != "" {
+		chosen, ok := season.Parse(seasonFlag)
+		if !ok {
+			return pipelineResult{}, fmt.Errorf("unknown season %q (choose one of: %s)",
+				seasonFlag, strings.Join(season.Names(), ", "))
+		}
+		sea = chosen
+	}
+	if noSeason {
+		sea = season.None
+	}
+
 	return pipelineResult{
 		activity:  act,
 		persisted: persisted,
@@ -153,6 +185,7 @@ func runPipeline() (pipelineResult, error) {
 		plant:     ps,
 		now:       now,
 		species:   sp,
+		season:    sea,
 	}, nil
 }
 
@@ -206,6 +239,8 @@ func renderPlant(cmd *cobra.Command) error {
 		Now:        r.now,
 		LastCommit: r.activity.LastCommit,
 		Species:    r.species,
+		Season:     r.season,
+		Holiday:    holidaySkin,
 	})
 	if _, perr := fmt.Fprintln(out, frame); perr != nil {
 		return perr
@@ -298,6 +333,13 @@ func init() {
 	// tolerance). A chosen species is remembered as the default for later runs.
 	rootCmd.PersistentFlags().StringVar(&speciesFlag, "species", "",
 		"plant species: "+strings.Join(species.Names(), " / ")+" (remembered as default)")
+
+	// --season forces a cosmetic season; --no-season disables seasonal dressing;
+	// --holiday opts into gentle holiday skins. All are ambient only.
+	rootCmd.PersistentFlags().StringVar(&seasonFlag, "season", "",
+		"force seasonal dressing: "+strings.Join(season.Names(), " / ")+" (default: derived from date)")
+	rootCmd.PersistentFlags().BoolVar(&noSeason, "no-season", false, "disable seasonal dressing (neutral look)")
+	rootCmd.PersistentFlags().BoolVar(&holidaySkin, "holiday", false, "opt into gentle holiday skins layered on the season")
 
 	// Hidden M2 bridge: dump parsed git activity. Removed once M3+ consume it.
 	rootCmd.Flags().BoolVar(&showActivity, "activity", false, "print parsed git activity (debug)")
