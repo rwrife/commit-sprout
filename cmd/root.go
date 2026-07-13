@@ -307,4 +307,5 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(promptCmd)
 	rootCmd.AddCommand(waterCmd)
+	rootCmd.AddCommand(bragCmd)
 }

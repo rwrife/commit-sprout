@@ -30,6 +30,7 @@ dopamine as a contribution streak, but with a face (well, leaves).
 ```bash
 commit-sprout            # render the current plant for the repo you're in
 commit-sprout status     # streak, last commit, days until it wilts
+commit-sprout brag       # one-line, standup-ready recap of recent growth
 commit-sprout prompt     # compact glyph for your shell prompt / tmux status
 commit-sprout --prompt   # same thing, as a flag (handy inside a prompt string)
 commit-sprout water      # buy a grace day before wilting (weekends / PTO)
@@ -57,6 +58,37 @@ last:    2 days ago (2026-07-03)
 grace:   1 day (watered)
 health:  healthy — commit today to stay ahead of thirst
 wilts:   2026-07-08
+```
+
+### Brag line (standups)
+
+Want a single, copy-pasteable line for your standup or Slack? `brag` recaps how
+the plant grew over the recent window (default 7 days), driven entirely by real
+commit data — no new state, just the shared read pipeline:
+
+```bash
+commit-sprout brag
+```
+
+```text
+This week your plant grew sprout→leafy on a 5-day streak (14 commits in 7 days). 🌱
+```
+
+It phrases itself honestly: a plant that has gone quiet nudges you to revive it
+rather than crowing about growth, and a brand-new repo says there's nothing to
+brag about yet. The output is plain (no color) and single-line, so it drops
+straight into a git `post-commit` hook for an ambient nudge:
+
+```bash
+# .git/hooks/post-commit
+#!/bin/sh
+commit-sprout brag
+```
+
+or into a standup helper:
+
+```bash
+echo "Standup: $(commit-sprout brag)"
 ```
 
 ### Watering can (grace days)

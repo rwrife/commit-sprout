@@ -107,6 +107,25 @@ func (s Stage) String() string {
 	}
 }
 
+// ParseStage maps a stage name (as produced by Stage.String) back to a Stage.
+// Unknown or empty names resolve to Seed, matching the "fresh plant" default so
+// a corrupt or hand-edited value can never produce an invalid stage. It is the
+// exported inverse of Stage.String, shared by persistence and display code.
+func ParseStage(name string) Stage {
+	switch name {
+	case Sprout.String():
+		return Sprout
+	case Leafy.String():
+		return Leafy
+	case Tall.String():
+		return Tall
+	case Blooming.String():
+		return Blooming
+	default:
+		return Seed
+	}
+}
+
 // Health is the plant's condition modifier, driven by commit recency. The zero
 // value is Healthy.
 type Health int
