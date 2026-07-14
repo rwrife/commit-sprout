@@ -86,6 +86,10 @@ func Seedling() string {
 // output is plain ASCII suitable for pipes, files, and CI snapshots.
 func Frame(ps plant.PlantState, opt Options) string {
 	art := species.ArtFor(opt.Species, ps.Stage, ps.Health)
+	// Overlay pests on the raw art first so the (single-block) color pass wraps
+	// cleanly around the whole plant; injecting glyphs after colorizeArt would
+	// risk splitting its ANSI sequences across lines.
+	art = withPests(art, ps)
 	caption := caption(ps, opt)
 
 	var b strings.Builder
@@ -99,6 +103,45 @@ func Frame(ps plant.PlantState, opt Options) string {
 		b.WriteString(caption)
 	}
 	return b.String()
+}
+
+// pestGlyph is the ASCII rune used to draw a single pest (aphid/weed) on the
+// plant. It is a plain, widely-available character so it renders identically
+// under --no-color and on minimal terminals.
+const pestGlyph = '%'
+
+// withPests overlays ps.Pests pest glyphs onto the raw (uncolored) plant art.
+// Pests are placed on the foliage: the glyph replaces a leading space on each
+// of the first few non-blank art lines so the pests sit *on* the plant rather
+// than floating beside it, degrading cleanly if the art is narrow. It is called
+// before any color pass so a single-block colorizer wraps the whole plant
+// without its ANSI sequences being split across lines. Zero pests is a no-op,
+// returning the art untouched so pest-free plants are byte-for-byte unchanged.
+func withPests(art string, ps plant.PlantState) string {
+	if ps.Pests <= 0 {
+		return art
+	}
+
+	glyph := string(pestGlyph)
+
+	lines := strings.Split(art, "\n")
+	placed := 0
+	for i := 0; i < len(lines) && placed < ps.Pests; i++ {
+		ln := lines[i]
+		if strings.TrimSpace(ln) == "" {
+			continue // skip blank lines; keep pests on actual foliage
+		}
+		// Replace the first space with a pest glyph so the glyph overlays the
+		// plant's margin without widening the block. If the line has no leading
+		// space (art flush-left), prepend instead as a graceful fallback.
+		if idx := strings.IndexByte(ln, ' '); idx >= 0 {
+			lines[i] = ln[:idx] + glyph + ln[idx+1:]
+		} else {
+			lines[i] = glyph + ln
+		}
+		placed++
+	}
+	return strings.Join(lines, "\n")
 }
 
 // PromptGlyph returns a compact one-line "glyph stage" suitable for a shell
@@ -138,6 +181,9 @@ func caption(ps plant.PlantState, opt Options) string {
 		fmt.Sprintf("last:   %s", lastCommitPhrase(ps, opt)),
 	}
 	if hint := wiltHint(ps); hint != "" {
+		lines = append(lines, "        "+hint)
+	}
+	if hint := pestHint(ps); hint != "" {
 		lines = append(lines, "        "+hint)
 	}
 	if ps.Mood != "" {
@@ -202,6 +248,19 @@ func wiltHint(ps plant.PlantState) string {
 	default:
 		return ""
 	}
+}
+
+// pestHint returns a short note when the plant has cosmetic pests, explaining
+// what they are and how to clear them, or "" when the plant is pest-free.
+func pestHint(ps plant.PlantState) string {
+	if ps.Pests <= 0 {
+		return ""
+	}
+	noun := "pest"
+	if ps.Pests != 1 {
+		noun = "pests"
+	}
+	return fmt.Sprintf("%d %s (from reverts) \u2014 a clean commit today clears them", ps.Pests, noun)
 }
 
 // artFor selects the ASCII frame for a stage/health combination. Wilting and
@@ -445,6 +504,7 @@ func Garden(plants []GardenPlant, opt Options) string {
 // beside one another.
 func gardenCell(p GardenPlant, opt Options) string {
 	art := species.ArtFor(p.Species, p.State.Stage, p.State.Health)
+	art = withPests(art, p.State)
 	if opt.Color {
 		art = colorizeArt(art, p.State)
 	}

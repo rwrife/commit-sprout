@@ -235,6 +235,37 @@ stage:  leafy (healthy)
   ambience layered on the same real, commit-driven plant, and it degrades to
   plain ASCII under `--no-color` / `NO_COLOR` / piped output.
 
+### Pests & weeds
+
+Messy git behavior gives your plant a few cosmetic **pests** (aphids/weeds),
+drawn as small `%` glyphs on the foliage:
+
+```
+%   ,
+%  /|
+% ' |
+   _|_
+  (   )
+   '-'
+
+stage:  sprout (healthy)
+streak: 1 day
+last:   today (2026-07-14)
+        3 pests (from reverts) — a clean commit today clears them
+```
+
+- **What spawns them:** revert commits in the look-back window. A revert is
+  detected purely from the conventional `Revert "…"` commit subject that
+  `git revert` writes — no commit content or diffs are ever read. Each in-window
+  revert adds one pest, capped at 3.
+- **How to clear them:** commit normally. A clean, healthy commit *today* (real
+  work, not just more reverts) tidies the plant back to zero pests.
+- **Gentle by design:** pests are visual + moral only. They **never** lower your
+  stage, streak, or health — they're a nudge, not a punishment.
+- **Turn them off:** `--no-pests` disables the overlay entirely for anyone who
+  prefers a plant that never shows negative signals. They also degrade to plain
+  ASCII under `--no-color` / `NO_COLOR` / piped output.
+
 ## Install
 
 ### Prebuilt binary (recommended)
@@ -365,6 +396,9 @@ See [PLAN.md](./PLAN.md) for the full plan, milestones (M1–M6), and the v0.2+ 
 - **Seasons & themes** (`commit-sprout --season` / `--no-season` / `--holiday`) —
   date-driven cosmetic palettes and decorations (leaves, snow, blossoms), purely
   ambient and never affecting the plant's state.
+- **Pests & weeds** (`--no-pests` to disable) — revert commits spawn small cosmetic
+  aphids/weeds you clear with a clean commit; visual + moral only, never touching
+  stage, streak, or health.
 
 ## License
 

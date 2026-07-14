@@ -67,6 +67,12 @@ var noSeason bool
 // decorations appear beyond the base season.
 var holidaySkin bool
 
+// noPests backs the --no-pests flag, which disables the cosmetic pest overlay
+// (aphids/weeds spawned by revert commits) entirely for people who prefer a
+// plant that never shows negative signals. It only suppresses the visual +
+// caption; it never affects stage, streak, or health.
+var noPests bool
+
 // rootCmd is the base command invoked as `commit-sprout` with no subcommand.
 var rootCmd = &cobra.Command{
 	Use:   "commit-sprout",
@@ -160,6 +166,13 @@ func runPipeline() (pipelineResult, error) {
 	}
 
 	ps := plant.ComputeWith(act, persisted.Plant(now, act.LastCommit), now, tune)
+
+	// --no-pests suppresses the cosmetic pest overlay without touching any of
+	// the growth/health signals: pests are purely visual, so zeroing the count
+	// here is the whole opt-out.
+	if noPests {
+		ps.Pests = 0
+	}
 
 	// Resolve the cosmetic season: --no-season disables it, an explicit
 	// --season forces one (reporting typos), otherwise derive it from now.
@@ -340,6 +353,10 @@ func init() {
 		"force seasonal dressing: "+strings.Join(season.Names(), " / ")+" (default: derived from date)")
 	rootCmd.PersistentFlags().BoolVar(&noSeason, "no-season", false, "disable seasonal dressing (neutral look)")
 	rootCmd.PersistentFlags().BoolVar(&holidaySkin, "holiday", false, "opt into gentle holiday skins layered on the season")
+
+	// --no-pests disables the cosmetic pest overlay (reverts spawn aphids you
+	// clear with a clean commit). Visual/moral only; never affects growth.
+	rootCmd.PersistentFlags().BoolVar(&noPests, "no-pests", false, "disable cosmetic pests (aphids/weeds from reverts)")
 
 	// Hidden M2 bridge: dump parsed git activity. Removed once M3+ consume it.
 	rootCmd.Flags().BoolVar(&showActivity, "activity", false, "print parsed git activity (debug)")

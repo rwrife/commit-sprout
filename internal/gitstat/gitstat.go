@@ -51,11 +51,23 @@ const logFieldDirective = "%x00"
 //	%H  full commit hash
 //	%aI author date, strict ISO-8601 (keeps the author's timezone offset)
 //	%aE author email (the "real" email after .mailmap is applied)
+//	%s  commit subject (first line only), used to detect revert commits
 //
 // Fields are joined with the %x00 directive so git emits NUL-separated output.
 // We use the *author* date/email rather than committer, because that reflects
 // when the work was actually done and by whom, which is what the plant rewards.
-var logFormat = strings.Join([]string{"%H", "%aI", "%aE"}, logFieldDirective)
+//
+// The subject is placed last because it is the only field that can contain
+// arbitrary text; keeping it in the final position means a subject that somehow
+// contained an unexpected byte cannot shift the position of the structured
+// fields ahead of it. (A real NUL still cannot appear in a git subject.)
+var logFormat = strings.Join([]string{"%H", "%aI", "%aE", "%s"}, logFieldDirective)
+
+// revertSubjectPrefix is the conventional prefix `git revert` writes as the
+// default subject of a revert commit: `Revert "<original subject>"`. Detecting
+// reverts by this convention keeps us to data git already exposes in the log
+// and honors PLAN.md §9 (never read commit *content*/diffs).
+const revertSubjectPrefix = `Revert "`
 
 // ErrNotARepo is returned when Read is invoked outside a git working tree.
 var ErrNotARepo = errors.New("gitstat: not a git repository")
@@ -97,13 +109,22 @@ type Activity struct {
 	// reference timezone) to the number of author commits on that day,
 	// limited to the window. Days with zero commits are omitted.
 	CommitsByDay map[string]int
+
+	// Reverts is the number of revert commits by the author within the
+	// window (the same range as TotalInWindow). A revert is detected purely
+	// from the commit subject convention `Revert "..."` that `git revert`
+	// writes by default, so no commit content or diff is ever read. It is a
+	// gentle "messy history" signal the plant surfaces as cosmetic pests; it
+	// never lowers stage or streak.
+	Reverts int
 }
 
 // commit is a single parsed `git log` record.
 type commit struct {
-	hash  string
-	when  time.Time
-	email string
+	hash    string
+	when    time.Time
+	email   string
+	subject string
 }
 
 // Read returns the Activity for the git repository in the current working
@@ -267,11 +288,22 @@ func parseLog(raw, author string, now time.Time, windowDays int) Activity {
 		if !day.Before(windowStart) {
 			act.TotalInWindow++
 			act.CommitsByDay[dayKey(local)]++
+			if isRevertSubject(c.subject) {
+				act.Reverts++
+			}
 		}
 	}
 
 	act.Streak = computeStreak(allDays, now, loc)
 	return act
+}
+
+// isRevertSubject reports whether a commit subject looks like a `git revert`
+// commit, i.e. it begins with the conventional `Revert "` prefix. Leading
+// whitespace is tolerated; matching is otherwise exact and case-sensitive to
+// avoid false positives on subjects that merely mention "revert" in prose.
+func isRevertSubject(subject string) bool {
+	return strings.HasPrefix(strings.TrimLeft(subject, " \t"), revertSubjectPrefix)
 }
 
 // parseCommits splits raw git output into commit records, skipping anything
@@ -284,7 +316,10 @@ func parseCommits(raw string) []commit {
 			continue
 		}
 		fields := strings.Split(line, logFieldSep)
-		if len(fields) != 3 {
+		// Records carry four fields (hash, date, email, subject). A subject
+		// is allowed to be empty, so accept exactly four fields; anything
+		// else is malformed and skipped defensively.
+		if len(fields) != 4 {
 			continue
 		}
 		when, err := time.Parse(time.RFC3339, strings.TrimSpace(fields[1]))
@@ -292,9 +327,10 @@ func parseCommits(raw string) []commit {
 			continue
 		}
 		out = append(out, commit{
-			hash:  strings.TrimSpace(fields[0]),
-			when:  when,
-			email: strings.TrimSpace(fields[2]),
+			hash:    strings.TrimSpace(fields[0]),
+			when:    when,
+			email:   strings.TrimSpace(fields[2]),
+			subject: fields[3],
 		})
 	}
 	return out

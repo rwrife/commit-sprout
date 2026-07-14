@@ -268,3 +268,45 @@ func TestColorFrameIsRenderable(t *testing.T) {
 		t.Errorf("color Frame should still contain caption text, got:\n%s", out)
 	}
 }
+
+// TestFrameDrawsPestsPlain verifies that a plant with pests renders pest glyphs
+// in the plain (no-color) path, and includes a caption hint explaining them.
+func TestFrameDrawsPestsPlain(t *testing.T) {
+	ps := plant.PlantState{
+		Stage:  plant.Leafy,
+		Health: plant.Healthy,
+		Streak: 3,
+		Pests:  2,
+	}
+	out := Frame(ps, Options{Color: false, Now: time.Now()})
+
+	if !strings.ContainsRune(out, pestGlyph) {
+		t.Errorf("Frame output missing pest glyph %q:\n%s", string(pestGlyph), out)
+	}
+	if strings.Count(out, string(pestGlyph)) < 2 {
+		t.Errorf("expected at least 2 pest glyphs, got %d:\n%s",
+			strings.Count(out, string(pestGlyph)), out)
+	}
+	if !strings.Contains(out, "from reverts") {
+		t.Errorf("Frame output missing pest caption hint:\n%s", out)
+	}
+}
+
+// TestFrameNoPestsUnchanged confirms a pest-free plant renders no pest glyphs,
+// keeping historical output byte-for-byte stable.
+func TestFrameNoPestsUnchanged(t *testing.T) {
+	ps := plant.PlantState{Stage: plant.Leafy, Health: plant.Healthy, Streak: 3}
+	with := Frame(ps, Options{Color: false, Now: time.Now()})
+	if strings.ContainsRune(with, pestGlyph) {
+		t.Errorf("pest-free plant unexpectedly rendered a pest glyph:\n%s", with)
+	}
+}
+
+// TestWithPestsIsNoOpAtZero guards the fast path: zero pests returns the art
+// unchanged.
+func TestWithPestsIsNoOpAtZero(t *testing.T) {
+	art := "  \\|/\n   |\n  _|_"
+	if got := withPests(art, plant.PlantState{Pests: 0}); got != art {
+		t.Errorf("withPests changed art at zero pests:\n%s", got)
+	}
+}
