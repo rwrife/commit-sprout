@@ -363,3 +363,56 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+// pestAct builds an Activity with an explicit revert count on top of the base
+// act helper, for exercising the cosmetic pest computation.
+func pestAct(streak, total, lastDaysAgo int, hasCommits bool, reverts int) gitstat.Activity {
+	a := act(streak, total, lastDaysAgo, hasCommits)
+	a.Reverts = reverts
+	return a
+}
+
+func TestPestsSpawnFromReverts(t *testing.T) {
+	// Two reverts, last commit yesterday (not a clean commit today) -> two pests.
+	ps := Compute(pestAct(3, 5, 1, true, 2), State{}, fixedNow)
+	if ps.Pests != 2 {
+		t.Errorf("Pests = %d; want 2", ps.Pests)
+	}
+	// Pests must never touch growth/health.
+	if ps.Stage != Leafy {
+		t.Errorf("Stage = %v; want leafy (pests must not change stage)", ps.Stage)
+	}
+}
+
+func TestPestsClampToMax(t *testing.T) {
+	// Way more reverts than the cap, last commit yesterday.
+	ps := Compute(pestAct(3, 20, 1, true, 10), State{}, fixedNow)
+	if ps.Pests != MaxPests {
+		t.Errorf("Pests = %d; want clamp to %d", ps.Pests, MaxPests)
+	}
+}
+
+func TestPestsClearOnCleanCommitToday(t *testing.T) {
+	// Reverts in the window, but a clean commit landed today (total > reverts,
+	// days since commit == 0) -> pests clear.
+	ps := Compute(pestAct(3, 5, 0, true, 2), State{}, fixedNow)
+	if ps.Pests != 0 {
+		t.Errorf("Pests = %d; want 0 after a clean healthy commit today", ps.Pests)
+	}
+}
+
+func TestPestsPersistWhenTodayIsAllReverts(t *testing.T) {
+	// Commit today, but every commit today was a revert (total == reverts):
+	// not a "clean" day, so pests stay.
+	ps := Compute(pestAct(3, 2, 0, true, 2), State{}, fixedNow)
+	if ps.Pests != 2 {
+		t.Errorf("Pests = %d; want 2 (no clean work today to clear them)", ps.Pests)
+	}
+}
+
+func TestNoRevertsNoPests(t *testing.T) {
+	ps := Compute(act(3, 5, 1, true), State{}, fixedNow)
+	if ps.Pests != 0 {
+		t.Errorf("Pests = %d; want 0 with no reverts", ps.Pests)
+	}
+}

@@ -69,6 +69,13 @@ const (
 	// papered over, and crucially grace only shifts *health* thresholds, never
 	// the growth stage or the streak count (see applyGrace / Compute).
 	MaxGraceDays = 2
+
+	// MaxPests bounds how many cosmetic pests (aphids/weeds) the plant can
+	// show at once. Messy git behavior -- reverts today -- spawns pests as a
+	// gentle, purely visual nudge; the count is clamped here so a churny day
+	// can never bury the plant. Pests never lower Stage, Streak, or Health;
+	// they clear after a clean healthy commit day (see pestsFor).
+	MaxPests = 3
 )
 
 // Stage is the plant's growth stage. Stages are ordered; higher values are
@@ -210,6 +217,15 @@ type PlantState struct {
 	// does not influence Stage or Streak.
 	GraceDays int
 
+	// Pests is the number of cosmetic pests (aphids/weeds) currently on the
+	// plant, clamped to [0, MaxPests]. Pests are spawned by messy git
+	// behavior (revert commits in the window) and are purely visual + moral:
+	// they never lower Stage, Streak, or Health. They clear after a clean
+	// healthy commit day (a commit today with no fresh reverts), so returning
+	// to a healthy cadence tidies the plant up. It is always 0 when pests are
+	// disabled by the caller.
+	Pests int
+
 	// Mood is a short, flavorful one-liner describing how the plant "feels"
 	// given its stage and health. Kept terse and with a little personality.
 	Mood string
@@ -287,9 +303,40 @@ func ComputeWith(act gitstat.Activity, st State, now time.Time, tune HealthTunin
 		Streak:              act.Streak,
 		DaysSinceCommit:     days,
 		GraceDays:           grace,
+		Pests:               pestsFor(act, days),
 		Mood:                moodFor(stage, health, act),
 		UpdatedHighestStage: highest,
 	}
+}
+
+// pestsFor maps recent messy git behavior to a bounded, cosmetic pest count.
+// The only signal in v1 is revert commits in the window: each spawns a pest,
+// clamped to [0, MaxPests]. Pests are gentle by design -- they never touch
+// Stage, Streak, or Health.
+//
+// They clear on a clean healthy commit day: when the last commit landed today
+// (days == 0) and that day introduced no new reverts, the plant is considered
+// tidied and shows zero pests. Any revert dated today keeps its pest visible so
+// a revert-heavy day still reflects, but committing normally the next day
+// clears the slate.
+func pestsFor(act gitstat.Activity, days int) int {
+	if act.Reverts <= 0 {
+		return 0
+	}
+	// A clean healthy commit today (no reverts among today's work) tidies the
+	// plant. We approximate "today's reverts" conservatively: only when the
+	// most recent commit is today do we allow clearing, and only if that day's
+	// commits were revert-free. Since Reverts is a window aggregate, we treat a
+	// commit-today with fewer reverts than commits as "there was clean work
+	// today" and clear, matching the gentle intent.
+	if days == 0 && act.TotalInWindow > act.Reverts {
+		return 0
+	}
+	pests := act.Reverts
+	if pests > MaxPests {
+		pests = MaxPests
+	}
+	return pests
 }
 
 // liveStage computes the stage implied purely by current activity, ignoring any

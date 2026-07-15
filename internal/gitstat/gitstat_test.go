@@ -13,9 +13,17 @@ import (
 var fixedNow = time.Date(2026, time.June, 30, 12, 0, 0, 0, time.UTC)
 
 // rec builds one raw `git log` record in the same shape logFormat produces:
-// hash, author-date (RFC3339), email — joined by NUL.
+// hash, author-date (RFC3339), email, subject — joined by NUL. It uses a
+// generic non-revert subject so existing tests exercise the common case; use
+// recSubject to supply a specific subject (e.g. a revert).
 func rec(hash, isoDate, email string) string {
-	return strings.Join([]string{hash, isoDate, email}, logFieldSep)
+	return recSubject(hash, isoDate, email, "work commit")
+}
+
+// recSubject builds a raw record with an explicit commit subject, letting tests
+// drive revert detection and other subject-sensitive behavior.
+func recSubject(hash, isoDate, email, subject string) string {
+	return strings.Join([]string{hash, isoDate, email, subject}, logFieldSep)
 }
 
 // logFixture joins records with newlines, mimicking `git log` stdout.
@@ -300,6 +308,51 @@ func TestRepoNameEmptyFallsBackToCwdBase(t *testing.T) {
 	for _, in := range []string{"", "."} {
 		if got := RepoName(in); got == "" {
 			t.Errorf("RepoName(%q) returned empty; want the cwd base name", in)
+		}
+	}
+}
+
+// TestParseLogCountsRevertsInWindow verifies that revert commits (subjects that
+// begin with the conventional `Revert "` prefix) are counted into Reverts, and
+// only when they fall inside the aggregate window.
+func TestParseLogCountsRevertsInWindow(t *testing.T) {
+	raw := logFixture(
+		recSubject("r1", "2026-06-30T09:00:00Z", "me@example.com", `Revert "add feature X"`),
+		recSubject("a1", "2026-06-30T08:00:00Z", "me@example.com", "add feature X"),
+		recSubject("r2", "2026-06-29T09:00:00Z", "me@example.com", `Revert "tweak Y"`),
+		// A commit that merely mentions "revert" in prose must NOT count.
+		recSubject("a2", "2026-06-28T09:00:00Z", "me@example.com", "do not revert this later"),
+		// A revert well outside the 7-day window is ignored by the count.
+		recSubject("r3", "2026-06-01T09:00:00Z", "me@example.com", `Revert "old change"`),
+	)
+
+	act := parseLog(raw, "me@example.com", fixedNow, DefaultWindowDays)
+
+	if act.Reverts != 2 {
+		t.Errorf("Reverts = %d; want 2 (two in-window reverts, prose 'revert' excluded, old revert out of window)", act.Reverts)
+	}
+	if act.TotalInWindow != 4 {
+		t.Errorf("TotalInWindow = %d; want 4", act.TotalInWindow)
+	}
+}
+
+// TestIsRevertSubject exercises the subject-prefix heuristic directly.
+func TestIsRevertSubject(t *testing.T) {
+	cases := []struct {
+		subject string
+		want    bool
+	}{
+		{`Revert "add feature"`, true},
+		{`  Revert "leading spaces tolerated"`, true},
+		{"Reverting a change", false},
+		{"revert lowercase not matched", false},
+		{"add a normal thing", false},
+		{"", false},
+		{`this Revert "in the middle" does not count`, false},
+	}
+	for _, c := range cases {
+		if got := isRevertSubject(c.subject); got != c.want {
+			t.Errorf("isRevertSubject(%q) = %v; want %v", c.subject, got, c.want)
 		}
 	}
 }
