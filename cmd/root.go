@@ -332,8 +332,9 @@ func init() {
 	rootCmd.SetVersionTemplate("commit-sprout {{.Version}}\n")
 
 	// --no-color forces the plain-ASCII render path (also honored via NO_COLOR
-	// and automatically for non-TTY output).
-	rootCmd.Flags().BoolVar(&noColor, "no-color", false, "disable color output (plain ASCII)")
+	// and automatically for non-TTY output). Persistent so subcommands like
+	// `card` can honor it for a mono export.
+	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable color output (plain ASCII)")
 
 	// --no-save renders without persisting state (read-only run).
 	rootCmd.PersistentFlags().BoolVar(&noSave, "no-save", false, "do not persist plant state for this run")

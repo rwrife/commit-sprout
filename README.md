@@ -34,6 +34,7 @@ commit-sprout brag       # one-line, standup-ready recap of recent growth
 commit-sprout prompt     # compact glyph for your shell prompt / tmux status
 commit-sprout --prompt   # same thing, as a flag (handy inside a prompt string)
 commit-sprout water      # buy a grace day before wilting (weekends / PTO)
+commit-sprout card       # export the plant as an SVG badge for your README
 commit-sprout watch      # live full-screen view; the plant gently sways
 commit-sprout garden     # a row of plants, one per repo (a windowsill)
 commit-sprout --species cactus   # pick your plant's species (remembered as default)
@@ -110,6 +111,35 @@ ever faking *progress*:
   waterings across commits into a permanent green streak.
 - **Health only** — grace never changes your growth stage or streak count; it
   just keeps a watered plant perky through a planned break.
+
+### README badge (SVG card)
+
+The green-squares contribution graph is culture — `card` gives commit-sprout an
+on-brand equivalent. It exports the current plant as a **self-contained SVG**
+(no external fonts or assets) you can embed as a living-ish badge:
+
+```bash
+commit-sprout card                 # writes plant.svg in the current directory
+commit-sprout card --out docs/plant.svg
+commit-sprout card --out -         # stream the SVG to stdout (pipe it anywhere)
+commit-sprout card --no-color      # mono card (single ink color)
+```
+
+The card mirrors the terminal view — the same stage, health, streak, and art —
+as monospace text plus a caption, so the badge is recognizably the same plant.
+Color honors the theme (green / amber / red foliage, with a magenta bloom
+accent); `--no-color` (or `NO_COLOR`) yields a mono card. Writes are atomic, so
+a crash mid-export never corrupts an existing `plant.svg`. Exporting a card is
+read-only: it never updates the remembered plant state.
+
+Embed it in your README:
+
+```markdown
+![my commit-sprout](./plant.svg)
+```
+
+Regenerate it however you like — a `post-commit` git hook, a nightly cron job,
+or a CI step that commits the refreshed `plant.svg`.
 
 ### Watch mode (windowsill)
 
