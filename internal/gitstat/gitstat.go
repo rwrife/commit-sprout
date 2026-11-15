@@ -117,6 +117,15 @@ type Activity struct {
 	// gentle "messy history" signal the plant surfaces as cosmetic pests; it
 	// never lowers stage or streak.
 	Reverts int
+
+	// Tags counts local commit tags dated within the activity window.
+	// Annotated tags use their tagger date; lightweight tags use the target
+	// commit's committer date because git stores no tag creation timestamp.
+	// Tags are repository milestones, independent of the author filter.
+	Tags int
+
+	// TagsByDay uses the same reference timezone and window as CommitsByDay.
+	TagsByDay map[string]int
 }
 
 // commit is a single parsed `git log` record.
@@ -144,8 +153,8 @@ func Read(author string, windowDays int) (Activity, error) {
 // committed under a different address). windowDays <= 0 falls back to
 // DefaultWindowDays.
 //
-// Like Read, ReadAt only orchestrates git and delegates the interesting work
-// to the pure parseLog, so it needs no live-repo test of its own.
+// ReadAt orchestrates git and delegates normalization to the pure parseLog
+// and withTags functions. Local tag milestones are not author-filtered.
 func ReadAt(dir, author string, windowDays int) (Activity, error) {
 	if windowDays <= 0 {
 		windowDays = DefaultWindowDays
@@ -167,7 +176,56 @@ func ReadAt(dir, author string, windowDays int) (Activity, error) {
 		return Activity{}, err
 	}
 
-	return parseLog(raw, author, time.Now(), windowDays), nil
+	tags, err := runTags(dir)
+	if err != nil {
+		return Activity{}, err
+	}
+	now := time.Now()
+	return withTags(parseLog(raw, author, now, windowDays), tags, now)
+}
+
+func runTags(dir string) (string, error) {
+	cmd := exec.Command("git", "for-each-ref",
+		"--format=%(objecttype)%00%(*objecttype)%00%(creatordate:iso-strict)", "refs/tags")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("gitstat: git for-each-ref failed: %w", err)
+	}
+	return string(out), nil
+}
+
+// withTags parses only ref types and timestamps, never tag messages or content.
+func withTags(act Activity, raw string, now time.Time) (Activity, error) {
+	act.Tags = 0
+	act.TagsByDay = map[string]int{}
+	today := startOfDay(now, now.Location())
+	start := today.AddDate(0, 0, -(act.WindowDays - 1))
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(strings.TrimSuffix(line, "\r"), logFieldSep)
+		if len(fields) != 3 {
+			return Activity{}, fmt.Errorf("gitstat: malformed tag metadata")
+		}
+		if fields[0] != "commit" && !(fields[0] == "tag" && fields[1] == "commit") {
+			continue
+		}
+		when, err := time.Parse(time.RFC3339, fields[2])
+		if err != nil {
+			return Activity{}, fmt.Errorf("gitstat: invalid tag timestamp: %w", err)
+		}
+		day := startOfDay(when, now.Location())
+		if day.After(today) {
+			day = today
+		}
+		if !day.Before(start) {
+			act.Tags++
+			act.TagsByDay[dayKey(day)]++
+		}
+	}
+	return act, nil
 }
 
 // ensureRepo verifies dir is inside a git working tree, translating git's

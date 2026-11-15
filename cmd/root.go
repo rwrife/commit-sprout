@@ -73,6 +73,9 @@ var holidaySkin bool
 // caption; it never affects stage, streak, or health.
 var noPests bool
 
+var noBloom bool
+var bloomCommits = plant.DefaultBloomCommits
+
 // rootCmd is the base command invoked as `commit-sprout` with no subcommand.
 var rootCmd = &cobra.Command{
 	Use:   "commit-sprout",
@@ -120,6 +123,9 @@ type pipelineResult struct {
 // It returns gitstat.ErrNotARepo unwrapped so callers can special-case the
 // "not a repo" message in their own voice.
 func runPipeline() (pipelineResult, error) {
+	if err := validateBloomFlags(); err != nil {
+		return pipelineResult{}, err
+	}
 	act, err := gitstat.Read("", gitstat.DefaultWindowDays)
 	if err != nil {
 		return pipelineResult{}, err
@@ -166,6 +172,7 @@ func runPipeline() (pipelineResult, error) {
 	}
 
 	ps := plant.ComputeWith(act, persisted.Plant(now, act.LastCommit), now, tune)
+	ps = applyBlooms(ps, act, now)
 
 	// --no-pests suppresses the cosmetic pest overlay without touching any of
 	// the growth/health signals: pests are purely visual, so zeroing the count
@@ -208,7 +215,23 @@ func runPipeline() (pipelineResult, error) {
 // grace days) change, giving callers an updated PlantState without touching git
 // again.
 func recomputeWith(r pipelineResult, updated store.State) plant.PlantState {
-	return plant.Compute(r.activity, updated.Plant(r.now, r.activity.LastCommit), r.now)
+	ps := plant.Compute(r.activity, updated.Plant(r.now, r.activity.LastCommit), r.now)
+	return applyBlooms(ps, r.activity, r.now)
+}
+
+func validateBloomFlags() error {
+	if bloomCommits <= 0 {
+		return fmt.Errorf("--bloom-commits must be positive")
+	}
+	return nil
+}
+
+func applyBlooms(ps plant.PlantState, act gitstat.Activity, now time.Time) plant.PlantState {
+	ps.Blooms = plant.BloomsFor(act, now, bloomCommits)
+	if noBloom {
+		ps.Blooms = 0
+	}
+	return ps
 }
 
 // persist folds the computed plant state back into the remembered file, unless
@@ -358,6 +381,9 @@ func init() {
 	// --no-pests disables the cosmetic pest overlay (reverts spawn aphids you
 	// clear with a clean commit). Visual/moral only; never affects growth.
 	rootCmd.PersistentFlags().BoolVar(&noPests, "no-pests", false, "disable cosmetic pests (aphids/weeds from reverts)")
+	rootCmd.PersistentFlags().BoolVar(&noBloom, "no-bloom", false, "disable temporary milestone flowers")
+	rootCmd.PersistentFlags().IntVar(&bloomCommits, "bloom-commits", plant.DefaultBloomCommits,
+		"commits in a single day needed for milestone flowers (must be positive)")
 
 	// Hidden M2 bridge: dump parsed git activity. Removed once M3+ consume it.
 	rootCmd.Flags().BoolVar(&showActivity, "activity", false, "print parsed git activity (debug)")

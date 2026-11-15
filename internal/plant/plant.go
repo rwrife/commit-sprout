@@ -76,6 +76,12 @@ const (
 	// can never bury the plant. Pests never lower Stage, Streak, or Health;
 	// they clear after a clean healthy commit day (see pestsFor).
 	MaxPests = 3
+
+	// Milestone flowers are cosmetic and expire after three calendar days,
+	// including the milestone day. Big-day tuning never changes growth.
+	DefaultBloomCommits = 10
+	BloomDays           = 3
+	MaxBlooms           = 3
 )
 
 // Stage is the plant's growth stage. Stages are ordered; higher values are
@@ -226,6 +232,9 @@ type PlantState struct {
 	// disabled by the caller.
 	Pests int
 
+	// Blooms is the bounded number of temporary milestone flowers.
+	Blooms int
+
 	// Mood is a short, flavorful one-liner describing how the plant "feels"
 	// given its stage and health. Kept terse and with a little personality.
 	Mood string
@@ -304,9 +313,33 @@ func ComputeWith(act gitstat.Activity, st State, now time.Time, tune HealthTunin
 		DaysSinceCommit:     days,
 		GraceDays:           grace,
 		Pests:               pestsFor(act, days),
+		Blooms:              BloomsFor(act, now, DefaultBloomCommits),
 		Mood:                moodFor(stage, health, act),
 		UpdatedHighestStage: highest,
 	}
+}
+
+// BloomsFor counts recent tags and big commit days without changing any growth
+// or health signals. Callers can tune the single-day commit threshold.
+func BloomsFor(act gitstat.Activity, now time.Time, bigDayCommits int) int {
+	if bigDayCommits <= 0 {
+		bigDayCommits = DefaultBloomCommits
+	}
+	blooms := 0
+	for age := 0; age < BloomDays; age++ {
+		key := now.AddDate(0, 0, -age).Format("2006-01-02")
+		if tags := act.TagsByDay[key]; tags > 0 {
+			// Clamp before adding so even an extreme aggregate cannot overflow.
+			blooms += min(tags, MaxBlooms-blooms)
+		}
+		if act.CommitsByDay[key] >= bigDayCommits && blooms < MaxBlooms {
+			blooms++
+		}
+		if blooms == MaxBlooms {
+			break
+		}
+	}
+	return blooms
 }
 
 // pestsFor maps recent messy git behavior to a bounded, cosmetic pest count.

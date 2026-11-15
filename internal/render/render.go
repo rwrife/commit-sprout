@@ -90,6 +90,7 @@ func Frame(ps plant.PlantState, opt Options) string {
 	// cleanly around the whole plant; injecting glyphs after colorizeArt would
 	// risk splitting its ANSI sequences across lines.
 	art = withPests(art, ps)
+	art = withBlooms(art, ps)
 	caption := caption(ps, opt)
 
 	var b strings.Builder
@@ -109,6 +110,29 @@ func Frame(ps plant.PlantState, opt Options) string {
 // plant. It is a plain, widely-available character so it renders identically
 // under --no-color and on minimal terminals.
 const pestGlyph = '%'
+
+const flowerGlyph = '@'
+
+// withBlooms replaces foliage glyphs, not the pot or margins. The ASCII flower
+// stays readable in monochrome and preserves the art's dimensions.
+func withBlooms(art string, ps plant.PlantState) string {
+	if ps.Blooms <= 0 {
+		return art
+	}
+	lines := strings.Split(art, "\n")
+	remaining := min(ps.Blooms, plant.MaxBlooms)
+	// Every species ends its art with the same three-line pot region.
+	for i := 0; i < len(lines)-3 && remaining > 0; i++ {
+		for col := 0; col < len(lines[i]); col++ {
+			if strings.ContainsRune("\\/|&+,.'-_*()<>~`oO", rune(lines[i][col])) {
+				lines[i] = lines[i][:col] + string(flowerGlyph) + lines[i][col+1:]
+				remaining--
+				break
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
 
 // withPests overlays ps.Pests pest glyphs onto the raw (uncolored) plant art.
 // Pests are placed on the foliage: the glyph replaces a leading space on each
@@ -185,6 +209,9 @@ func caption(ps plant.PlantState, opt Options) string {
 	}
 	if hint := pestHint(ps); hint != "" {
 		lines = append(lines, "        "+hint)
+	}
+	if ps.Blooms > 0 {
+		lines = append(lines, fmt.Sprintf("        %d milestone flower(s) (tags / big commit days)", ps.Blooms))
 	}
 	if ps.Mood != "" {
 		lines = append(lines, "")
@@ -423,7 +450,7 @@ func colorizeArt(art string, ps plant.PlantState) string {
 	case plant.Wilting:
 		style = wiltingStyle
 	default:
-		if ps.Stage == plant.Blooming {
+		if ps.Stage == plant.Blooming || ps.Blooms > 0 {
 			style = bloomStyle
 		}
 	}
@@ -505,6 +532,7 @@ func Garden(plants []GardenPlant, opt Options) string {
 func gardenCell(p GardenPlant, opt Options) string {
 	art := species.ArtFor(p.Species, p.State.Stage, p.State.Health)
 	art = withPests(art, p.State)
+	art = withBlooms(art, p.State)
 	if opt.Color {
 		art = colorizeArt(art, p.State)
 	}
