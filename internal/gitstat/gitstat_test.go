@@ -2,11 +2,84 @@ package gitstat
 
 import (
 	"fmt"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestTagMetadataWindow(t *testing.T) {
+	raw := strings.Join([]string{
+		"commit\x00\x002026-06-30T09:00:00Z",
+		"tag\x00commit\x002026-06-24T00:00:00Z",
+		"tag\x00commit\x002026-06-23T23:59:59Z",
+		"tag\x00commit\x002026-06-29T23:30:00-02:00",
+		"commit\x00\x002026-07-01T09:00:00Z",
+		"blob\x00\x00",
+		"tag\x00tree\x002026-06-30T09:00:00Z",
+	}, "\n")
+	base := parseLog("", "me@example.com", fixedNow, 7)
+	got, err := withTags(base, raw, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"2026-06-30": 3, "2026-06-24": 1}
+	if got.Tags != 4 || !reflect.DeepEqual(got.TagsByDay, want) {
+		t.Fatalf("tags = %d, %v; want 4, %v", got.Tags, got.TagsByDay, want)
+	}
+	got.Tags, got.TagsByDay = base.Tags, base.TagsByDay
+	if !reflect.DeepEqual(got, base) {
+		t.Fatal("tag metadata changed commit activity")
+	}
+	for _, bad := range []string{"commit", "tag\x00commit\x00not-a-date"} {
+		if _, err := withTags(base, bad, fixedNow); err == nil {
+			t.Errorf("malformed tag metadata %q did not error", bad)
+		}
+	}
+}
+
+func TestRunTagsLightweightAndAnnotated(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return string(out)
+	}
+	git("init", "--quiet")
+	git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+		"-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "fixture")
+	git("-c", "tag.gpgsign=false", "tag", "lightweight")
+	git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+		"-c", "tag.gpgsign=false", "tag", "-a", "annotated", "-m", "not read by gitstat")
+	raw, err := runTags(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	act, err := withTags(Activity{WindowDays: 7}, raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if act.Tags != 2 || act.TagsByDay[now.Format("2006-01-02")] != 2 {
+		t.Fatalf("real tags = %+v; want two tags today", act)
+	}
+	if strings.Contains(raw, "not read by gitstat") {
+		t.Fatal("tag reader included tag content")
+	}
+	filtered, err := ReadAt(dir, "nobody@example.com", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filtered.Tags != 2 || filtered.HasCommits || filtered.TotalInWindow != 0 {
+		t.Fatalf("repository tags should survive the author filter: %+v", filtered)
+	}
+}
 
 // fixedNow is a stable reference clock used across tests. Using UTC keeps the
 // day-boundary math obvious in the fixtures below.

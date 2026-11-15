@@ -7,6 +7,73 @@ import (
 	"github.com/rwrife/commit-sprout/internal/gitstat"
 )
 
+func TestMilestoneBlooms(t *testing.T) {
+	cases := []struct {
+		name      string
+		commits   map[string]int
+		tags      map[string]int
+		threshold int
+		want      int
+	}{
+		{"below threshold", map[string]int{"2026-06-30": 9}, nil, 10, 0},
+		{"at threshold", map[string]int{"2026-06-30": 10}, nil, 10, 1},
+		{"custom threshold", map[string]int{"2026-06-30": 4}, nil, 4, 1},
+		{"not window total", map[string]int{"2026-06-30": 6, "2026-06-29": 6}, nil, 10, 0},
+		{"tag only", nil, map[string]int{"2026-06-30": 1}, 10, 1},
+		{"last visible day", map[string]int{"2026-06-28": 10}, map[string]int{"2026-06-28": 1}, 10, 2},
+		{"expired", map[string]int{"2026-06-27": 10}, map[string]int{"2026-06-27": 1}, 10, 0},
+		{"bounded combined", map[string]int{"2026-06-30": 10}, map[string]int{"2026-06-30": 100}, 10, MaxBlooms},
+		{"negative tags ignored", nil, map[string]int{"2026-06-30": -1}, 10, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := gitstat.Activity{CommitsByDay: tc.commits, TagsByDay: tc.tags}
+			if got := BloomsFor(a, fixedNow, tc.threshold); got != tc.want {
+				t.Fatalf("BloomsFor = %d; want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBloomsExpireWithoutAffectingGrowth(t *testing.T) {
+	a := act(3, 10, 0, true)
+	a.CommitsByDay = map[string]int{"2026-06-30": DefaultBloomCommits}
+	a.TagsByDay = map[string]int{"2026-06-30": 1}
+	st := State{HighestStage: Tall, BestStreak: 9, GraceDays: 1}
+	for age := 0; age <= BloomDays; age++ {
+		now := fixedNow.AddDate(0, 0, age)
+		got := Compute(a, st, now)
+		if age < BloomDays && got.Blooms != 2 {
+			t.Fatalf("age %d: blooms = %d; want 2", age, got.Blooms)
+		}
+		if age == BloomDays && got.Blooms != 0 {
+			t.Fatalf("flowers did not expire: %+v", got)
+		}
+		without := a
+		without.TagsByDay, without.CommitsByDay = nil, nil
+		bare := Compute(without, st, now)
+		got.Blooms = 0
+		if got != bare {
+			t.Fatalf("blooms changed other state: %+v vs %+v", got, bare)
+		}
+	}
+}
+
+func TestBloomsUseCalendarDaysAcrossDST(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 3, 9, 0, 30, 0, 0, loc)
+	a := gitstat.Activity{TagsByDay: map[string]int{"2026-03-07": 1}}
+	if got := BloomsFor(a, now, 10); got != 1 {
+		t.Fatalf("DST last visible day = %d; want 1", got)
+	}
+	if got := BloomsFor(a, now.AddDate(0, 0, 1), 10); got != 0 {
+		t.Fatalf("DST expired blooms = %d; want 0", got)
+	}
+}
+
 // fixedNow is a stable reference clock. UTC keeps the day-boundary math in the
 // fixtures obvious.
 var fixedNow = time.Date(2026, time.June, 30, 12, 0, 0, 0, time.UTC)

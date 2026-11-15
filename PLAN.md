@@ -115,7 +115,8 @@ Data flow: `git log` → `gitstat.Activity` → merged with `store.State` → `p
 3. **Species selection** — fern, bonsai, cactus (cactus survives droughts longer), sunflower,
    mushroom; pick your vibe.
 4. **Animated mode** — `commit-sprout watch` gently sways/grows in a live TUI loop.
-5. **Bloom on milestones** — flowers triggered by tags/releases or a big commit day.
+5. [x] **Bloom on milestones** — temporary flowers triggered by local tags/releases
+   or a configurable big commit day (`--bloom-commits`, opt out with `--no-bloom`).
 6. **Pests & weeds** — reverts, force-pushes, or huge red-diff days spawn aphids you must clear.
 7. **Seasons / themes** — autumn palette, snow, holiday skins by date.
 8. **GitHub/GitLab API source** — feed the plant from contribution data instead of a local repo

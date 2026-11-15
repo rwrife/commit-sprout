@@ -75,7 +75,7 @@ func cardArtColor(ps plant.PlantState) string {
 	case plant.Wilting:
 		return cardWiltingHex
 	default:
-		if ps.Stage == plant.Blooming {
+		if ps.Stage == plant.Blooming || ps.Blooms > 0 {
 			return cardBloomHex
 		}
 		return cardHealthyHex
@@ -93,6 +93,7 @@ func Card(ps plant.PlantState, opt CardOptions) string {
 	// Reuse the exact art the terminal would draw (plain path + pests) so the
 	// card and shell views are the same plant.
 	art := withPests(species.ArtFor(opt.Species, ps.Stage, ps.Health), ps)
+	art = withBlooms(art, ps)
 	artRows := strings.Split(art, "\n")
 
 	// Reuse the shared caption block for parity with the terminal render. We

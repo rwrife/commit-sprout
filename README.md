@@ -265,6 +265,31 @@ stage:  leafy (healthy)
   ambience layered on the same real, commit-driven plant, and it degrades to
   plain ASCII under `--no-color` / `NO_COLOR` / piped output.
 
+### Milestone blooms
+
+Local tags and big commit days add temporary `@` flowers to the foliage, distinct
+from the plant's steady growth. Each recent tag adds a flower; a day with **10 or
+more commits** by your configured author adds another. Flowers are capped at
+three and disappear after **three calendar days**, including the milestone day.
+They never change stage, streak, health, or remembered growth.
+
+```bash
+commit-sprout --bloom-commits 5     # tune the positive single-day threshold
+commit-sprout --no-bloom           # disable milestone flowers and their caption
+```
+
+Tags are repository-wide milestones, regardless of the commit author. Annotated
+tags use their tagger timestamp; lightweight tags use the target commit's
+committer timestamp (Git does not record when a lightweight tag was created).
+Only local tags pointing to commits in the activity window are counted. Releases
+are celebrated through their local tags: fetch tags yourself if needed; no
+GitHub API, tag messages, or commit content is read for this feature.
+
+Flowers appear in the terminal view, watch mode, garden, and SVG card. They
+remain plain ASCII under `--no-color`, `NO_COLOR`, or piped output. The opt-out
+does not remove flowers already part of a species' mature growth-stage art or
+seasonal dressing.
+
 ### Pests & weeds
 
 Messy git behavior gives your plant a few cosmetic **pests** (aphids/weeds),
@@ -423,6 +448,8 @@ See [PLAN.md](./PLAN.md) for the full plan, milestones (M1–M6), and the v0.2+ 
   each with its own art set; the cactus survives droughts longer as a gameplay twist.
 - **Animated watch mode** (`commit-sprout watch`) — a live full-screen view where the
   plant gently sways and re-reads git activity on an interval.
+- [x] **Bloom on milestones** (`--bloom-commits` / `--no-bloom`) — local tags/releases
+  and big commit days add bounded flowers that expire after three calendar days.
 - **Seasons & themes** (`commit-sprout --season` / `--no-season` / `--holiday`) —
   date-driven cosmetic palettes and decorations (leaves, snow, blossoms), purely
   ambient and never affecting the plant's state.

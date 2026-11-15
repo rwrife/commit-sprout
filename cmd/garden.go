@@ -207,6 +207,9 @@ func runGardenRemove(cmd *cobra.Command, args []string) error {
 // (a garden is a read-only glance). Repos that cannot be read are reported on
 // stderr and skipped so one bad path doesn't sink the whole view.
 func renderGarden(cmd *cobra.Command, args []string) error {
+	if err := validateBloomFlags(); err != nil {
+		return err
+	}
 	out := cmd.OutOrStdout()
 
 	repos, err := resolveGardenRepos(args)
@@ -236,6 +239,7 @@ func renderGarden(cmd *cobra.Command, args []string) error {
 		// Read-only: start from a fresh (unremembered) plant so the garden
 		// reflects live activity without needing per-repo saved state.
 		ps := plant.Compute(act, store.DefaultState().Plant(now, act.LastCommit), now)
+		ps = applyBlooms(ps, act, now)
 		plants = append(plants, render.GardenPlant{
 			Label:      gitstat.RepoName(dir),
 			State:      ps,

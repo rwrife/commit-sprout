@@ -6,7 +6,65 @@ import (
 	"time"
 
 	"github.com/rwrife/commit-sprout/internal/plant"
+	"github.com/rwrife/commit-sprout/internal/species"
 )
+
+func TestMilestoneFlowersPreserveArtShape(t *testing.T) {
+	for _, sp := range species.All() {
+		for stage := plant.Seed; stage <= plant.Blooming; stage++ {
+			for health := plant.Healthy; health <= plant.Wilting; health++ {
+				ps := plant.PlantState{Stage: stage, Health: health, Pests: 1}
+				art := withPests(species.ArtFor(sp, stage, health), ps)
+				if got := withBlooms(art, ps); got != art {
+					t.Fatalf("%s/%s/%s: zero blooms changed art", sp, stage, health)
+				}
+				ps.Blooms = 99
+				got := withBlooms(art, ps)
+				added := strings.Count(got, string(flowerGlyph)) - strings.Count(art, string(flowerGlyph))
+				if added < 1 || added > plant.MaxBlooms {
+					t.Fatalf("%s/%s/%s: added %d flowers", sp, stage, health, added)
+				}
+				before, after := strings.Split(art, "\n"), strings.Split(got, "\n")
+				if len(before) != len(after) {
+					t.Fatal("flowers changed art height")
+				}
+				for i := range before {
+					if len(before[i]) != len(after[i]) {
+						t.Fatalf("flowers changed row %d width", i)
+					}
+					if i >= len(before)-3 && before[i] != after[i] {
+						t.Fatal("flowers changed the pot")
+					}
+				}
+				if strings.Count(got, string(pestGlyph)) != strings.Count(art, string(pestGlyph)) {
+					t.Fatal("flowers erased pests")
+				}
+			}
+		}
+	}
+}
+
+func TestMilestoneFlowersAcrossRenderers(t *testing.T) {
+	ps := plant.PlantState{Stage: plant.Leafy, Health: plant.Healthy, Blooms: 2}
+	opt := Options{Now: time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)}
+	frame := Frame(ps, opt)
+	if strings.Contains(frame, "\x1b") || !strings.Contains(frame, "2 milestone flower(s)") {
+		t.Fatalf("plain milestone frame missing caption or contains ANSI:\n%s", frame)
+	}
+	for name, out := range map[string]string{
+		"frame":  frame,
+		"garden": Garden([]GardenPlant{{Label: "fixture", State: ps}}, opt),
+		"card":   Card(ps, CardOptions{Now: opt.Now}),
+	} {
+		if strings.Count(out, string(flowerGlyph)) != 2 {
+			t.Fatalf("%s missing flower overlay:\n%s", name, out)
+		}
+	}
+	ps.Blooms = 0
+	if strings.Contains(Frame(ps, opt), "milestone flower") {
+		t.Fatal("zero blooms retained milestone caption")
+	}
+}
 
 func TestSeedlingNotEmpty(t *testing.T) {
 	got := Seedling()
