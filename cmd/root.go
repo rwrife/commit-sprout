@@ -86,7 +86,8 @@ streak and it blooms; ghost your repo and it wilts.
 
 Run with no arguments to render the current plant. Use "status" for a compact
 text summary or "prompt" (or --prompt) for a one-line glyph you can embed in a
-shell prompt, tmux, or starship.`,
+shell prompt, tmux, or starship. Use "notify" for an opt-in warning only when
+the plant is close to wilting.`,
 	// SilenceUsage/SilenceErrors keep output clean; we print errors ourselves.
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -114,6 +115,7 @@ type pipelineResult struct {
 	now       time.Time
 	species   species.Kind
 	season    season.Season
+	tuning    plant.HealthTuning
 }
 
 // runPipeline performs the shared read half of every command: read git
@@ -123,6 +125,12 @@ type pipelineResult struct {
 // It returns gitstat.ErrNotARepo unwrapped so callers can special-case the
 // "not a repo" message in their own voice.
 func runPipeline() (pipelineResult, error) {
+	return runPipelineWithStateErrors(false)
+}
+
+// Notifications must not report a trustworthy countdown after failing to read
+// the saved species or watering grace. Other commands retain best-effort reads.
+func runPipelineWithStateErrors(strict bool) (pipelineResult, error) {
 	if err := validateBloomFlags(); err != nil {
 		return pipelineResult{}, err
 	}
@@ -132,9 +140,15 @@ func runPipeline() (pipelineResult, error) {
 	}
 
 	statePath, pathErr := store.DefaultPath()
+	if strict && pathErr != nil {
+		return pipelineResult{}, pathErr
+	}
 	persisted := store.DefaultState()
 	if pathErr == nil {
 		if loaded, lerr := store.Load(statePath); lerr != nil {
+			if strict {
+				return pipelineResult{}, lerr
+			}
 			fmt.Fprintln(os.Stderr, "commit-sprout: warning:", lerr)
 		} else {
 			persisted = loaded
@@ -206,6 +220,7 @@ func runPipeline() (pipelineResult, error) {
 		now:       now,
 		species:   sp,
 		season:    sea,
+		tuning:    tune,
 	}, nil
 }
 
@@ -394,4 +409,5 @@ func init() {
 	rootCmd.AddCommand(promptCmd)
 	rootCmd.AddCommand(waterCmd)
 	rootCmd.AddCommand(bragCmd)
+	rootCmd.AddCommand(newNotifyCmd())
 }
