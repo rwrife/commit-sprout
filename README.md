@@ -30,6 +30,7 @@ dopamine as a contribution streak, but with a face (well, leaves).
 ```bash
 commit-sprout            # render the current plant for the repo you're in
 commit-sprout status     # streak, last commit, days until it wilts
+commit-sprout notify     # opt-in: warn only when close to wilting
 commit-sprout brag       # one-line, standup-ready recap of recent growth
 commit-sprout prompt     # compact glyph for your shell prompt / tmux status
 commit-sprout --prompt   # same thing, as a flag (handy inside a prompt string)
@@ -111,6 +112,53 @@ ever faking *progress*:
   waterings across commits into a permanent green streak.
 - **Health only** — grace never changes your growth stage or streak count; it
   just keeps a watered plant perky through a planned break.
+
+### Wilt notifications (opt-in)
+
+`notify` checks once and exits; nothing is installed or enabled automatically.
+It prints one plain warning only when **days until wilt <= threshold** (default
+1), otherwise nothing. Already-wilting plants count as 0 days; no matching recent
+activity stays silent after a successful git read. The countdown respects your
+saved/explicit species and watering grace. This command never saves state or
+starts a daemon/watcher.
+
+```bash
+commit-sprout notify
+commit-sprout notify --threshold 2
+commit-sprout notify --json       # one JSON object only when at risk
+commit-sprout notify --desktop    # also try notify-send (Linux) / osascript (macOS)
+commit-sprout notify --desktop --quiet  # desktop only; no stdout
+```
+
+JSON warning fields are `days_until_wilt`, `threshold`, and `message`. `--quiet`
+and `--json` are mutually exclusive. All successful checks exit 0, including
+warnings and quiet runs; invalid flags, non-repositories, git/state read errors,
+and output failures exit nonzero. Desktop support is best-effort: missing tools,
+unsupported platforms, or failed delivery produce a stderr warning but never
+fail the check. Delivery attempts time out after five seconds.
+
+**Optional daily cron** (use your own absolute binary/repository paths; cron has
+a minimal PATH). Cron can mail text output if configured, or add `--desktop`
+when the session's desktop environment is available:
+
+```cron
+0 9 * * * cd /home/you/code/project && /home/you/.local/bin/commit-sprout notify
+```
+
+**Optional zsh shell hook** (add to `~/.zshrc`):
+
+```zsh
+autoload -Uz add-zsh-hook
+__commit_sprout_notify() {
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    commit-sprout notify
+  fi
+}
+add-zsh-hook precmd __commit_sprout_notify
+```
+
+Each invocation is independent, so a shell hook repeats the warning on each
+prompt while at risk. Remove the cron entry/hook to stop nudges.
 
 ### README badge (SVG card)
 

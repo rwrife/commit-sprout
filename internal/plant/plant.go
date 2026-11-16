@@ -282,6 +282,16 @@ func DefaultHealthTuning() HealthTuning {
 	}
 }
 
+// DaysUntilWilt returns the number of idle calendar days remaining before
+// wilting, including watering grace and species tuning. Already-wilting plants
+// return 0; a seed with no commit history returns -1 (nothing to project).
+func DaysUntilWilt(ps PlantState, tune HealthTuning) int {
+	if ps.DaysSinceCommit < 0 {
+		return -1
+	}
+	return max(0, tune.WiltingAfterDays+1+clampGrace(ps.GraceDays)-ps.DaysSinceCommit)
+}
+
 // ComputeWith is Compute with an explicit HealthTuning so a species can widen
 // (or tighten) how long the plant tolerates a dry spell before wilting. Growth
 // (stage/streak) is unaffected -- only the health thresholds move -- so a
