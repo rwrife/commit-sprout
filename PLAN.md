@@ -125,7 +125,7 @@ Data flow: `git log` → `gitstat.Activity` → merged with `store.State` → `p
    grew from sprout→leafy (14 commits)" line for standups.
 10. **Shareable plant card** — export current plant as an SVG/PNG for a README badge.
 11. **Team garden / leaderboard** — opt-in shared garden where a team's plants grow together.
-12. **Notifications** — optional nudge when the plant is about to wilt (cron/`atuin`-style hook).
+12. [x] **Notifications** — opt-in, one-shot nudge when the plant is about to wilt; no daemon.
 
 ## 9. Out of scope
 
