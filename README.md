@@ -504,11 +504,9 @@ See [PLAN.md](./PLAN.md) for the full plan, milestones (M1–M6), and the v0.2+ 
 - **Pests & weeds** (`--no-pests` to disable) — revert commits spawn small cosmetic
   aphids/weeds you clear with a clean commit; visual + moral only, never touching
   stage, streak, or health.
+- **Wilt notifications** (`commit-sprout notify`) — opt-in, one-shot warnings
+  when the plant is close to wilting; no daemon or default notifications.
 
 ## License
 
 MIT — see [LICENSE](./LICENSE).
-
----
-
-Part of an automated tool-lab experiment. Topic: `auto-tool-lab`.
